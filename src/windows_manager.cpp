@@ -1,0 +1,379 @@
+//
+// Created by Niffoxic (Aka Harsh Dubey) on 12/18/2025.
+//
+// -----------------------------------------------------------------------------
+// Project   : DirectX12
+// Purpose   : Academic and self-learning computer graphics project.
+// Codebase  : DirectX 12 implementation based on the Luna Graphics Programming
+//             textbook. This repository includes practical scene-style
+//             implementations as well as answers and solutions to the
+//             end-of-chapter questions for learning and reference purposes.
+// License   : MIT License
+// -----------------------------------------------------------------------------
+//
+// Copyright (c) 2025 Niffoxic
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+//
+// -----------------------------------------------------------------------------
+#include "framework/windows_manager/windows_manager.h"
+
+#include "utility/logger.h"
+
+#include "framework/exception/win_exception.h"
+#include "framework/event/event_queue.h"
+#include "framework/event/events_window.h"
+
+#include "imgui.h"
+#include "backends/imgui_impl_win32.h"
+
+using namespace framework;
+
+DxWindowsManager::~DxWindowsManager()
+{
+	if (!Release())
+	{
+		logger::error("Failed to Release Windows Resources cleanly!");
+	}
+}
+
+_Use_decl_annotations_
+DxWindowsManager::DxWindowsManager(const DX12_WINDOWS_MANAGER_CREATE_DESC& desc)
+{
+	m_config.Height		 = desc.Height;
+	m_config.Width		 = desc.Width;
+	m_config.Title		 = desc.WindowTitle;
+	m_config.ScreenState = desc.ScreenState;
+	m_config.IconID		 = desc.IconId;
+}
+
+_Use_decl_annotations_
+EProcessedMessageState DxWindowsManager::ProcessMessages() noexcept
+{
+	MSG message{};
+
+	while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
+	{
+		if (message.message == WM_QUIT)
+		{
+			return EProcessedMessageState::ExitMessage;
+		}
+
+		TranslateMessage(&message);
+		DispatchMessage(&message);
+	}
+
+	return EProcessedMessageState::ExecuteMessage;
+}
+
+_Use_decl_annotations_
+bool DxWindowsManager::Initialize()
+{
+	if (!InitWindowScreen()) return false;
+
+	if (auto handle = GetWindowsHandle())
+	{
+		Mouse.AttachWindowHandle(handle);
+
+		if (!ImGui_ImplWin32_Init(handle))
+			return false;
+	}
+	return true;
+}
+
+_Use_decl_annotations_
+bool DxWindowsManager::Release() noexcept
+{
+	return true;
+}
+
+_Use_decl_annotations_
+void DxWindowsManager::OnFrameBegin(float deltaTime) noexcept
+{
+	Keyboard.OnFrameBegin(deltaTime);
+	Mouse	.OnFrameBegin(deltaTime);
+}
+
+void DxWindowsManager::OnFrameEnd() noexcept
+{
+	Keyboard.OnFrameEnd();
+	Mouse   .OnFrameEnd();
+}
+
+_Use_decl_annotations_
+HWND DxWindowsManager::GetWindowsHandle() const noexcept
+{
+	return m_pWindowsHandle;
+}
+
+_Use_decl_annotations_
+HINSTANCE DxWindowsManager::GetWindowsInstance() const noexcept
+{
+	return m_pWindowsInstance;
+}
+
+_Use_decl_annotations_
+float DxWindowsManager::GetAspectRatio() const noexcept
+{
+	return static_cast<float>(m_config.Width)
+		 / static_cast<float>(m_config.Height);
+}
+
+_Use_decl_annotations_
+void DxWindowsManager::SetScreenState(const EScreenState state) noexcept
+{
+	if (state == m_config.ScreenState) return; // same state
+	m_config.ScreenState = state;
+
+	//~ transition states
+	if (m_config.ScreenState == EScreenState::Fullscreen)
+	{
+		TransitionToFullScreen();
+	} else TransitionToWindowedScreen();
+
+	if (auto handle = GetWindowsHandle()) UpdateWindow(handle);
+
+	RECT rt{};
+	if (auto handle = GetWindowsHandle())
+	{
+		GetClientRect(handle, &rt);
+	} else return;
+
+	UINT width  = rt.right - rt.left;
+	UINT height = rt.bottom - rt.top;
+
+	//~ Post Event to the queue
+	if (m_config.ScreenState == EScreenState::Fullscreen)
+		EventQueue::Post<FULL_SCREEN_EVENT>({ width, height });
+	else
+		EventQueue::Post<WINDOWED_SCREEN_EVENT>({ width, height });
+}
+
+_Use_decl_annotations_
+void DxWindowsManager::SetWindowTitle(const std::wstring& title) noexcept
+{
+	if (auto handle = GetWindowsHandle())
+	{
+		m_config.Title = title;
+		SetWindowText(handle, title.c_str());
+	}
+}
+
+_Use_decl_annotations_
+void DxWindowsManager::SetWindowMessageOnTitle(const std::wstring& message) const noexcept
+{
+	if (auto handle = GetWindowsHandle())
+	{
+		std::wstring convert = m_config.Title + L" " + message;
+		SetWindowText(handle, convert.c_str());
+	}
+}
+
+_Use_decl_annotations_
+bool DxWindowsManager::InitWindowScreen()
+{
+	m_pWindowsInstance = GetModuleHandle(nullptr);
+
+	WNDCLASSEX wc{};
+	wc.cbSize	   = sizeof(WNDCLASSEX);
+	wc.style	   = CS_OWNDC;
+	wc.lpfnWndProc = &WindowProcSetup;
+	wc.cbClsExtra  = 0;
+	wc.cbWndExtra  = sizeof(LONG_PTR);
+	wc.hInstance   = m_pWindowsInstance;
+
+	//~ Set Icon
+	if (m_config.IconID)
+	{
+		wc.hIcon   = LoadIcon(m_pWindowsInstance, MAKEINTRESOURCE(m_config.IconID));
+		wc.hIconSm = LoadIcon(m_pWindowsInstance, MAKEINTRESOURCE(m_config.IconID));
+	} else
+	{
+		wc.hIcon   = LoadIcon(nullptr, IDI_APPLICATION);
+		wc.hIconSm = LoadIcon(nullptr, IDI_APPLICATION);
+	}
+	wc.hCursor		 = LoadCursor(nullptr, IDC_ARROW);
+	wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+	wc.lpszMenuName  = nullptr;
+	wc.lpszClassName = m_config.Title.c_str();
+
+	if (!RegisterClassEx(&wc))
+	{
+		THROW_WIN();
+		return false;
+	}
+
+	DWORD style = WS_OVERLAPPEDWINDOW;
+
+	RECT rect
+	{ 0, 0,
+	  static_cast<LONG>(m_config.Width),
+	  static_cast<LONG>(m_config.Height)
+	};
+
+	if (!AdjustWindowRect(&rect, style, FALSE))
+	{
+		THROW_WIN();
+		return false;
+	}
+
+	int adjustedWidth  = rect.right  - rect.left;
+	int adjustedHeight = rect.bottom - rect.top;
+
+	m_pWindowsHandle = CreateWindowEx(
+		0,
+		wc.lpszClassName,
+		m_config.Title.c_str(),
+		style,
+		CW_USEDEFAULT, CW_USEDEFAULT,
+		adjustedWidth, adjustedHeight,
+		nullptr,
+		nullptr,
+		m_pWindowsInstance,
+		this);
+
+	if (!m_pWindowsHandle)
+	{
+		THROW_WIN();
+		return false;
+	}
+
+	ShowWindow  (m_pWindowsHandle, SW_SHOW);
+	UpdateWindow(m_pWindowsHandle);
+
+	return true;
+}
+
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+_Use_decl_annotations_
+LRESULT DxWindowsManager::MessageHandler(HWND   hwnd,
+										 UINT   message,
+										 WPARAM wParam,
+										 LPARAM lParam) noexcept
+{
+	if (ImGui_ImplWin32_WndProcHandler(hwnd, message, wParam, lParam)) return S_OK;
+	if (Keyboard.ProcessMessage(message, wParam, lParam)) return S_OK;
+	if (Mouse   .ProcessMessage(message, wParam, lParam)) return S_OK;
+
+	switch (message)
+	{
+	case WM_SIZE:
+	{
+		m_config.Width  = LOWORD(lParam);
+		m_config.Height = HIWORD(lParam);
+		EventQueue::Post<WINDOW_RESIZE_EVENT>
+			(WINDOW_RESIZE_EVENT{ m_config.Width, m_config.Height });
+		return S_OK;
+	}
+	case WM_ENTERSIZEMOVE: // clicked mouse on title bar
+	case WM_KILLFOCUS:
+	{
+		EventQueue::Post<WINDOW_PAUSE_EVENT>({ true });
+		return S_OK;
+	}
+	case WM_EXITSIZEMOVE: // not clicking anymore
+	case WM_SETFOCUS:
+	{
+		EventQueue::Post<WINDOW_PAUSE_EVENT>({ false });
+		return S_OK;
+	}
+	case WM_CLOSE:
+	{
+		PostQuitMessage(0);
+		return S_OK;
+	}
+	default:
+		return DefWindowProc(hwnd, message, wParam, lParam);
+	}
+	return S_OK;
+}
+
+_Use_decl_annotations_
+LRESULT framework::DxWindowsManager::WindowProcThunk(
+	HWND   hwnd,
+	UINT   msg,
+	WPARAM wParam,
+	LPARAM lParam) noexcept
+{
+	if (auto that = reinterpret_cast<DxWindowsManager*>(GetWindowLongPtr(hwnd, GWLP_USERDATA)))
+	{
+		return that->MessageHandler(hwnd, msg, wParam, lParam);
+	}
+	return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+_Use_decl_annotations_
+LRESULT framework::DxWindowsManager::WindowProcSetup(
+	HWND hwnd,
+	UINT message,
+	WPARAM wParam,
+	LPARAM lParam)
+{
+	if (message == WM_NCCREATE)
+	{
+		CREATESTRUCT* create = reinterpret_cast<CREATESTRUCT*>(lParam);
+		DxWindowsManager* that = reinterpret_cast<DxWindowsManager*>(create->lpCreateParams);
+
+		SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(that));
+		SetWindowLongPtr(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WindowProcThunk));
+
+		return that->MessageHandler(hwnd, message, wParam, lParam);
+	}
+
+	return DefWindowProc(hwnd, message, wParam, lParam);
+}
+
+void DxWindowsManager::TransitionToFullScreen() noexcept
+{
+	if (m_config.ScreenState != EScreenState::Fullscreen) return; //~ its windowed
+
+	auto handle = GetWindowsHandle();
+	if (!handle) return;
+	GetWindowPlacement(handle, &m_WindowPlacement);
+
+	SetWindowLong(handle, GWL_STYLE, WS_POPUP);
+	SetWindowPos(
+		handle,
+		HWND_TOP,
+		0, 0,
+		GetSystemMetrics(SM_CXSCREEN),
+		GetSystemMetrics(SM_CYSCREEN),
+		SWP_FRAMECHANGED | SWP_SHOWWINDOW
+	);
+}
+
+void DxWindowsManager::TransitionToWindowedScreen() const noexcept
+{
+	if (m_config.ScreenState != EScreenState::Windowed) return; //~ its full screen
+
+	auto handle = GetWindowsHandle();
+	if (!handle) return;
+
+	SetWindowLong(handle, GWL_STYLE, WS_OVERLAPPEDWINDOW);
+	SetWindowPlacement(handle, &m_WindowPlacement);
+	SetWindowPos
+	(
+		handle,
+		nullptr,
+		0, 0,
+		0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW
+	);
+}
