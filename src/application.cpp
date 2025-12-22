@@ -104,6 +104,12 @@ void framework::Application::Release()
 
 void framework::Application::Tick(float deltaTime)
 {
+	if (m_latchedSceneIndex.has_value() && IsSceneIndexValid(*m_latchedSceneIndex))
+	{
+		m_activeSceneIndex = *m_latchedSceneIndex;
+		m_latchedSceneIndex.reset();
+	}
+
 	if (m_scenes.empty())
 	{
 		ImguiView(deltaTime);
@@ -120,7 +126,14 @@ void framework::Application::Tick(float deltaTime)
 	ImguiView(deltaTime);
 
 	scene->FrameEnd(deltaTime);
-	ApplyPendingSceneSwitch();
+
+	if (m_requestedSceneIndex.has_value() && IsSceneIndexValid(*m_requestedSceneIndex))
+	{
+		if (*m_requestedSceneIndex != m_activeSceneIndex)
+			m_latchedSceneIndex = *m_requestedSceneIndex;
+
+		m_requestedSceneIndex.reset();
+	}
 }
 
 void framework::Application::CreateImguiSRVHeap()
@@ -148,8 +161,8 @@ void framework::Application::ImguiView(float deltaTime)
 	if (!IsSceneIndexValid(m_activeSceneIndex))
 		m_activeSceneIndex = 0u;
 
-	if (m_pendingSceneIndex != static_cast<size_t>(-1))
-		ImGui::Text("Pending Scene Index: %zu (will apply after FrameEnd)", m_pendingSceneIndex);
+	if (m_requestedSceneIndex.has_value())
+		ImGui::Text("Pending Scene Index: %zu (will apply after FrameEnd)", *m_requestedSceneIndex);
 	else
 		ImGui::Text("Pending Scene Index: none");
 
@@ -182,11 +195,6 @@ void framework::Application::DrawMainMenuBar()
 	{
 		ImGui::Separator();
 		ImGui::Text("Active: %zu", m_activeSceneIndex);
-		if (m_pendingSceneIndex != static_cast<size_t>(-1))
-		{
-			ImGui::SameLine();
-			ImGui::Text("| Pending: %zu", m_pendingSceneIndex);
-		}
 	}
 
 	ImGui::EndMainMenuBar();
@@ -200,32 +208,24 @@ void framework::Application::DrawSceneMenu()
 
 		for (size_t i = 0; i < m_scenes.size(); ++i)
 		{
-			const bool isActive = (i == m_activeSceneIndex);
-			const bool isPending = (i == m_pendingSceneIndex);
+			const bool isActive  = (i == m_activeSceneIndex);
+			const bool isPending = m_requestedSceneIndex.has_value() && (i == *m_requestedSceneIndex);
 
-			// show pending marker
-			std::string label;
-			if (i < names.size())
-				label = names[i];
-			else
-				label = std::to_string(i);
+			std::string label = (i < names.size()) ? names[i] : std::to_string(i);
+			if (isPending) label += "  (pending)";
 
-			if (isPending)
-				label += "  (pending)";
-
-			// Clicking sets pending scene
 			if (ImGui::MenuItem(label.c_str(), nullptr, isActive))
 			{
 				if (i != m_activeSceneIndex)
-					m_pendingSceneIndex = i;
+					m_requestedSceneIndex = i;
 			}
 		}
 
-		if (m_pendingSceneIndex != static_cast<size_t>(-1))
+		if (m_requestedSceneIndex.has_value())
 		{
 			ImGui::Separator();
 			if (ImGui::MenuItem("Cancel pending switch"))
-				m_pendingSceneIndex = static_cast<size_t>(-1);
+				m_requestedSceneIndex.reset();
 		}
 
 		ImGui::EndMenu();

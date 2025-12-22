@@ -56,8 +56,6 @@ private:
 	void SaveData() const;
 
 private:
-	std::uint32_t m_frameIndex{ 0u };
-	std::uint64_t m_fenceValue{ 0u };
 	HANDLE m_waitEvent;
 	float m_colors[4]{1.f, 1.f, 1.f, 1.f};
 };

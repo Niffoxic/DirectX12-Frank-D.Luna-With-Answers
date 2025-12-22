@@ -73,7 +73,8 @@ void SceneChapter4::FrameBegin(float deltaTime)
 	ID3D12DescriptorHeap* heaps[] = { Render.SrvHeap.Get() };
 	Render.GfxCmd->SetDescriptorHeaps(1, heaps);
 
-	auto* back = Render.SwapChainBuffer[m_frameIndex].Get();
+	const auto frameIndex = Render.GetFrameIndex();
+	auto* back = Render.SwapChainBuffer[frameIndex].Get();
 
 	D3D12_RESOURCE_BARRIER barrier{};
 	barrier.Type					= D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -84,7 +85,7 @@ void SceneChapter4::FrameBegin(float deltaTime)
 	Render.GfxCmd->ResourceBarrier(1u, &barrier);
 
 	const auto dsvHandle = Render.GetDSVBaseHandle(); // initialized on 1st slot;
-	const auto rtvHandle = Render.GetBackBufferHandle(m_frameIndex);
+	const auto rtvHandle = Render.GetBackBufferHandle(frameIndex);
 
 	Render.GfxCmd->ClearDepthStencilView(dsvHandle,
 		D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
@@ -105,10 +106,12 @@ void SceneChapter4::FrameBegin(float deltaTime)
 
 void SceneChapter4::FrameEnd(float deltaTime)
 {
-	ID3D12DescriptorHeap* heaps[] = { Render.SrvHeap.Get() };
-	Render.GfxCmd->SetDescriptorHeaps(1, heaps);
+	const auto frameIndex = Render.GetFrameIndex();
 
-	auto* back = Render.SwapChainBuffer[m_frameIndex].Get();
+	ID3D12DescriptorHeap* heaps[] = { Render.SrvHeap.Get() };
+	Render.GfxCmd->SetDescriptorHeaps(1u, heaps);
+
+	auto* back = Render.SwapChainBuffer[frameIndex].Get();
 
 	D3D12_RESOURCE_BARRIER barrier{};
 	barrier.Type					= D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -124,17 +127,20 @@ void SceneChapter4::FrameEnd(float deltaTime)
 
 	THROW_DX_IF_FAILS(Render.SwapChain->Present(0u, 0u));
 
-	++m_fenceValue;
-	m_frameIndex = (m_frameIndex + 1) % Render.BackBufferCount;
-	THROW_DX_IF_FAILS(Render.GfxQueue->Signal(Render.Fence.Get(), m_fenceValue));
+	Render.IncrementFenceValue();
+	const auto fenceValue = Render.GetFenceValue();
 
-	if (Render.Fence->GetCompletedValue() < m_fenceValue)
+	THROW_DX_IF_FAILS(Render.GfxQueue->Signal(Render.Fence.Get(), fenceValue));
+
+	if (Render.Fence->GetCompletedValue() < fenceValue)
 	{
 		THROW_DX_IF_FAILS(Render.Fence->SetEventOnCompletion(
-			m_fenceValue,
+			fenceValue,
 			m_waitEvent));
 		WaitForSingleObject(m_waitEvent, INFINITE);
 	}
+
+	Render.IncrementFrameIndex();
 }
 
 void SceneChapter4::ImguiView(float deltaTime)

@@ -39,6 +39,7 @@
 #include "utility/logger.h"
 
 #include <dxgidebug.h>
+#include <fstream>
 
 framework::DxRenderManager::DxRenderManager(DxWindowsManager* windows)
 	: Windows(windows)
@@ -84,6 +85,70 @@ ID3D12Resource * framework::DxRenderManager::GetBackBuffer(const std::uint32_t i
 {
 	const std::uint32_t safe = index % BackBufferCount;
 	return SwapChainBuffer[safe].Get();
+}
+
+void framework::DxRenderManager::IncrementFenceValue()
+{
+	++FenceValue;
+}
+
+void framework::DxRenderManager::IncrementFrameIndex()
+{
+	FrameIndex = (FrameIndex + 1u) % BackBufferCount;
+}
+
+std::uint64_t framework::DxRenderManager::GetFenceValue() const
+{
+	return FenceValue;
+}
+
+std::uint32_t framework::DxRenderManager::GetFrameIndex() const
+{
+	return FrameIndex;
+}
+
+Microsoft::WRL::ComPtr<ID3DBlob> framework::DxRenderManager::CompileShader(
+	const std::wstring &filename,
+	const D3D_SHADER_MACRO *defines,
+	const std::string &entrypoint,
+	const std::string &target)
+{
+	UINT compileFlags = 0;
+#if defined(DEBUG) || defined(_DEBUG)
+	compileFlags = D3DCOMPILE_DEBUG |
+	D3DCOMPILE_SKIP_OPTIMIZATION;
+#endif
+
+	HRESULT hr = S_OK;
+	Microsoft::WRL::ComPtr<ID3DBlob> byteCode = nullptr;
+	Microsoft::WRL::ComPtr<ID3DBlob> errors;
+
+	hr = D3DCompileFromFile(filename.c_str(), defines,
+		D3D_COMPILE_STANDARD_FILE_INCLUDE,
+		entrypoint.c_str(), target.c_str(),
+		compileFlags,
+		0, &byteCode, &errors);
+
+	if(errors != nullptr) OutputDebugStringA(static_cast<char *>(errors->GetBufferPointer()));
+
+	THROW_DX_IF_FAILS(hr);
+	return byteCode;
+}
+
+Microsoft::WRL::ComPtr<ID3DBlob> framework::DxRenderManager::LoadBinary(const std::wstring &filename)
+{
+	std::ifstream fin(filename, std::ios::binary);
+	fin.seekg(0, std::ios_base::end);
+
+	const std::ifstream::pos_type size = fin.tellg();
+	fin.seekg(0, std::ios_base::beg);
+
+	Microsoft::WRL::ComPtr<ID3DBlob> blob;
+	THROW_DX_IF_FAILS(D3DCreateBlob(size, &blob));
+
+	fin.read(static_cast<char*>(blob->GetBufferPointer()), size);
+	fin.close();
+	return blob;
 }
 
 bool framework::DxRenderManager::CreateDirect3D()
@@ -423,7 +488,7 @@ bool framework::DxRenderManager::CreateDepthStencil()
 		&properties,
 		D3D12_HEAP_FLAG_NONE,
 		&resource,
-		D3D12_RESOURCE_STATE_COMMON,
+		D3D12_RESOURCE_STATE_DEPTH_WRITE,
 		&clearFlag,
 		IID_PPV_ARGS(&DepthStencilBuffer)
 		));
@@ -432,15 +497,6 @@ bool framework::DxRenderManager::CreateDepthStencil()
 		DepthStencilBuffer.Get(),
 		nullptr,
 		GetDSVBaseHandle());
-
-	D3D12_RESOURCE_BARRIER barrier{};
-	barrier.Type  = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-	barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-	barrier.Transition.pResource   = DepthStencilBuffer.Get();
-	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-	barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-
-	GfxCmd->ResourceBarrier(1u, &barrier);
 
 	logger::success("Created Depth Stencil View and Buffer!");
 	return true;
@@ -455,8 +511,8 @@ void framework::DxRenderManager::CreateViewport()
 	Viewport.TopLeftX = 0;
 	Viewport.TopLeftY = 0;
 
-	const long width_half = Windows->GetWindowsWidth() / 2;
-	const long height_half = Windows->GetWindowsHeight() / 2;
+	const long width_half = Windows->GetWindowsWidth();
+	const long height_half = Windows->GetWindowsHeight();
 	ScissorRect = {0, 0, width_half , height_half };
 
 	logger::success("Created Scissor and Viewport!");

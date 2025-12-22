@@ -46,6 +46,7 @@
 #include <dxgi1_4.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <string>
 #include <functional>
 #include <unordered_map>
 
@@ -75,6 +76,22 @@ namespace framework
 		D3D12_CPU_DESCRIPTOR_HANDLE GetDSVBaseHandle() const;
 		D3D12_CPU_DESCRIPTOR_HANDLE GetBackBufferHandle(const std::uint32_t index) const;
 		ID3D12Resource* GetBackBuffer(const std::uint32_t index) const;
+
+		void IncrementFenceValue();
+		void IncrementFrameIndex();
+
+		std::uint64_t GetFenceValue() const;
+		std::uint32_t GetFrameIndex() const;
+
+		//~ Helpers
+		static Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(
+			const std::wstring& filename,
+			const D3D_SHADER_MACRO* defines,
+			const std::string& entrypoint,
+			const std::string& target
+		);
+
+		static Microsoft::WRL::ComPtr<ID3DBlob> LoadBinary(const std::wstring& filename);
 
 	private:
 		bool CreateDirect3D();
@@ -148,6 +165,7 @@ namespace framework
 		D3D12_VIEWPORT Viewport{};
 		D3D12_RECT     ScissorRect{};
 		std::uint32_t  FrameIndex{ 0u };
+		std::uint64_t  FenceValue{ 0u };
 	};
 } // namespace framework
 

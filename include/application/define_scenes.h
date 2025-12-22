@@ -38,7 +38,9 @@
 
 #include "registry_scene.h"
 #include "scene/scene_chapter_4.h"
+#include "scene/scene_chapter_6.h"
 
 REGISTER_SCENE(SceneChapter4);
+REGISTER_SCENE(SceneChapter6);
 
 #endif //DIRECTX12_DEFINE_SCENES_H

@@ -75,6 +75,8 @@ namespace framework
 
 	private:
 		std::vector<std::unique_ptr<IScene>> m_scenes;
+		std::optional<size_t> m_requestedSceneIndex;
+		std::optional<size_t> m_latchedSceneIndex;
 		size_t m_activeSceneIndex { 0u };
 		size_t m_pendingSceneIndex{ static_cast<size_t>(-1) };
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_imguiHeap;

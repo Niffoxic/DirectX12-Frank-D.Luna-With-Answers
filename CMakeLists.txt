@@ -78,6 +78,8 @@ add_executable(application WIN32
         include/utility/helpers.h
         src/helpers.cpp
         src/json_loader.cpp
+        include/application/scene/scene_chapter_6.h
+        src/scene_chapter_6.cpp
 )
 
 target_compile_definitions(application PRIVATE
