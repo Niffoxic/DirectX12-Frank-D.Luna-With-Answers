@@ -31,6 +31,13 @@ On top of the textbook work, I’m building an **ImGui-driven chapter/scene sele
 
 ---
 
+### Chapter 7 — Geometry, Terrain & CPU/GPU Thinking
+![Chapter 7 Mountain Solid](outputs/chapter-7/mountain-output-solid.png)
+![Chapter 7 Mountain Wireframe](outputs/chapter-7/mountain-output-wireframe.png)
+
+> I will add water and skeleton later...
+---
+
 ## What’s Inside
 
 - **Chapter-based scenes**  
@@ -39,10 +46,7 @@ On top of the textbook work, I’m building an **ImGui-driven chapter/scene sele
 - **Exercise answers**  
   Implementations are provided where the book includes questions.
 
-- **ImGui controls** for:
-  - selecting which chapter scene runs
-  - toggling individual answers
-  - editing scene parameters (viewport, scissor, animation, clipping, pulses, etc.)
+- **ImGui controls**
 
 ---
 

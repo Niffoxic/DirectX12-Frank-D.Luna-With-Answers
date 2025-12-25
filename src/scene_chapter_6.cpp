@@ -292,8 +292,8 @@ void SceneChapter6::ImguiView(const float deltaTime)
 			ImGui::Spacing();
 			ImGui::Text("Viewport Size");
 
-			const float maxWidth  = static_cast<float>(Render.Windows->GetWindowsWidth());
-			const float maxHeight = static_cast<float>(Render.Windows->GetWindowsHeight());
+			const auto maxWidth  = static_cast<float>(Render.Windows->GetWindowsWidth());
+			const auto maxHeight = static_cast<float>(Render.Windows->GetWindowsHeight());
 
 			ImGui::DragFloat("Width",  &m_viewport.Width,  1.0f, 1.0f, maxWidth);
 			ImGui::DragFloat("Height", &m_viewport.Height, 1.0f, 1.0f, maxHeight);

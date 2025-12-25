@@ -80,6 +80,10 @@ add_executable(application WIN32
         src/json_loader.cpp
         include/application/scene/scene_chapter_6.h
         src/scene_chapter_6.cpp
+        include/application/scene/scene_chapter_7.h
+        src/scene_chapter_7.cpp
+        include/utility/mesh_generator.h
+        src/mesh_generator.cpp
 )
 
 target_compile_definitions(application PRIVATE
