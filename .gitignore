@@ -70,3 +70,4 @@ build.ninja
 vcpkg_installed/
 .conan/
 conanbuildinfo.*
+assets/**

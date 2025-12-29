@@ -2,16 +2,7 @@
 
 This repo is my **DirectX 12 learning playground** built while following the **Frank Luna DirectX 12 textbook**.
 
-The goal is not “just make it work”, but **understand every step**.
-
-So I intentionally:
-- **avoid helper-heavy workflows**
-- **do not rely on DirectXTK / convenience libraries**
-- **repeat code on purpose** across chapters (it’s hella slow)
-  - because rewriting it forces me to think about *each pipeline step* again instead of autopiloting (but helps think about possible design decisions later <3).
-
-On top of the textbook work, I’m building an **ImGui-driven chapter/scene selector** so I can run the project like a mini “chapter browser”, and tweak scene parameters per chapter.
-
+``NOT A REPLICA``
 ---
 
 ## Current Output
@@ -31,11 +22,14 @@ On top of the textbook work, I’m building an **ImGui-driven chapter/scene sele
 
 ---
 
-### Chapter 7 — Geometry, Terrain & CPU/GPU Thinking
+### Chapter 7
 ![Chapter 7 Mountain Solid](outputs/chapter-7/mountain-output-solid.png)
 ![Chapter 7 Mountain Wireframe](outputs/chapter-7/mountain-output-wireframe.png)
 
-> I will add water and skeleton later...
+---
+
+### Chapter 8 — Lights (In Progress)
+![Chapter 8 Water](outputs/misc/river.gif)
 ---
 
 ## What’s Inside

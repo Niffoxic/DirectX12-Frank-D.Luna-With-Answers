@@ -36,117 +36,12 @@
 #ifndef DIRECTX12_SCENE_CHAPTER_7_H
 #define DIRECTX12_SCENE_CHAPTER_7_H
 #include <DirectXMath.h>
-#include <imgui.h>
 
 #include "interface_scene.h"
 #include "utility/mesh_generator.h"
-
-// TODO: Add Skeleton and Water.
-
-struct PerObjectConstants
-{
-	DirectX::XMFLOAT4X4 World;
-};
-
-struct PassConstants
-{
-	DirectX::XMFLOAT4X4 View;
-	DirectX::XMFLOAT4X4 InvView;
-	DirectX::XMFLOAT4X4 Projection;
-	DirectX::XMFLOAT4X4 InvProjection;
-	DirectX::XMFLOAT4X4 ViewProjection;
-	DirectX::XMFLOAT4X4 InvViewProjection;
-	DirectX::XMFLOAT3	EyePositionW;
-	float padding;
-	DirectX::XMFLOAT2 RenderTargetSize;
-	DirectX::XMFLOAT2 InvRenderTargetSize;
-	float NearZ;
-	float FarZ;
-	float TotalTime;
-	float DeltaTime;
-};
-
-struct Transformation
-{
-	DirectX::XMFLOAT3 Position{ 0.f, 0.f, 0.f };
-	DirectX::XMFLOAT3 Rotation{ 0.f, 0.f, 0.f }; // Pitch, Yaw, Roll (radians)
-	DirectX::XMFLOAT3 Scale   { 1.f, 1.f, 1.f };
-
-private:
-	mutable DirectX::XMMATRIX m_cached{ DirectX::XMMatrixIdentity() };
-	mutable bool m_dirty{ true };
-
-public:
-	void MarkDirty() const noexcept { m_dirty = true; }
-
-	DirectX::XMFLOAT4X4 GetTransform() const
-	{
-		using namespace DirectX;
-
-		if (m_dirty)
-		{
-			const XMVECTOR pos   = XMLoadFloat3(&Position);
-			const XMVECTOR rot   = XMLoadFloat3(&Rotation);
-			const XMVECTOR scale = XMLoadFloat3(&Scale);
-
-			const XMMATRIX S = XMMatrixScalingFromVector(scale);
-			const XMMATRIX R = XMMatrixRotationRollPitchYawFromVector(rot);
-			const XMMATRIX T = XMMatrixTranslationFromVector(pos);
-
-			m_cached = S * R * T;
-			m_dirty  = false;
-		}
-
-		XMFLOAT4X4 out{};
-		XMStoreFloat4x4(&out, m_cached);
-		return out;
-	}
-
-	void ImguiView()
-	{
-		bool changed = false;
-
-		changed |= ImGui::DragFloat3("Position", &Position.x, 0.01f);
-		changed |= ImGui::DragFloat3("Rotation (rad)", &Rotation.x, 0.01f);
-		changed |= ImGui::DragFloat3("Scale", &Scale.x, 0.01f);
-
-		if (changed)
-			MarkDirty();
-	}
-};
-
-struct MeshGeometry
-{
-	Microsoft::WRL::ComPtr<ID3D12Resource> GeometryBuffer;
-	Microsoft::WRL::ComPtr<ID3D12Resource> GeometryUploader;
-
-	//~ Geometry Info
-	UINT IndexCount			{ 0u };
-	UINT StartIndexLocation	{ 0u };
-	UINT BaseVertexLocation	{ 0u };
-	D3D12_VERTEX_BUFFER_VIEW viewVertex{};
-	D3D12_INDEX_BUFFER_VIEW  viewIndex {};
-};
-
-struct ConstantData
-{
-	std::vector<D3D12_CONSTANT_BUFFER_VIEW_DESC> View;
-	std::vector<BYTE*> Mapped{};
-};
-
-struct RenderItem
-{
-	bool Visible{ true };
-	MeshGeometry*	Mesh;
-	Transformation	Transform;
-	UINT			FrameIndex{ 0 };
-
-	//~ Constants
-	Microsoft::WRL::ComPtr<ID3D12Resource>	 ConstantBuffer;
-	std::vector<D3D12_GPU_DESCRIPTOR_HANDLE> BaseCBHandle;
-	ConstantData PerObject	 {};
-	ConstantData PassConstant{};
-};
+#include "framework/render_manager/components/render_item.h"
+#include "framework/render_manager/components/decriptor_heap.h"
+#include "framework/render_manager/components/pipeline.h"
 
 enum class EShape
 {
@@ -203,12 +98,6 @@ private:
 	//~ helpers
 	void ImguiMountainConfig();
 
-	void CreateSingleGeometry(
-			MeshGeometry& mesh,
-			const MeshData& data
-		) const;
-
-	void CreateConstantBuffer(RenderItem& item);
 	void UpdateConstantBuffer(float deltaTime);
 	void DrawRenderItems();
 
@@ -229,8 +118,7 @@ private:
 
 	//~ Descriptor Heap for constant buffers
 	bool m_bSRVHeapInitialized{ false };
-	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_SRVHeapDescriptor;
-	std::uint32_t m_allocated{ 0 };
+	framework::DescriptorHeap m_descriptorHeap{};
 
 	//~ Geometry Resources
 	bool m_bGeometryInitialized{ false };
@@ -249,10 +137,10 @@ private:
 	bool m_bRootSignatureInitialized{ false };
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature	{};
 	bool m_bPipelineInitialized		{ false };
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipeline		{};
+	framework::Pipeline m_pipeline	{};
 
 	//~ configs
-	PassConstants m_globalPassConstant{};
+	PassConstantsCPU m_globalPassConstant{};
 	DirectX::XMFLOAT4X4 m_view{};
 	DirectX::XMFLOAT4X4 m_proj{};
 	float m_lastPrinted{ 5.f };

@@ -43,6 +43,8 @@
 #include "utility/mesh_generator.h"
 #include "utility/json_loader.h"
 
+#include <imgui.h>
+
 SceneChapter7::SceneChapter7(framework::DxRenderManager &renderer)
 	: IScene(renderer)
 {
@@ -67,8 +69,9 @@ SceneChapter7::SceneChapter7(framework::DxRenderManager &renderer)
 	// Projection
 	{
 		constexpr float fovY   = DirectX::XMConvertToRadians(60.0f);
-		const float aspect = static_cast<float>(Render.Windows->GetWindowsHeight()) /
+		const float aspect = static_cast<float>(Render.Windows->GetWindowsWidth()) /
 							 static_cast<float>(Render.Windows->GetWindowsHeight());
+
 		constexpr float zNear  = 0.1f;
 		constexpr float zFar   = 1000.0f;
 
@@ -165,10 +168,15 @@ void SceneChapter7::FrameBegin(float deltaTime)
 		m_cpuIdleCount = 0;
 	}else m_lastPrinted -= deltaTime;
 
+	if (m_pipeline.IsInitialized() && m_pipeline.IsDirty())
+	{
+		m_pipeline.Initialize(&Render);
+	}
+
 	auto* alloc = m_commandAllocators[fi].Get();
 	THROW_DX_IF_FAILS(alloc->Reset());
 	THROW_DX_IF_FAILS(Render.GfxCmd->Reset(alloc,
-			m_pipeline.Get()));
+			m_pipeline.GetNative()));
 
 	//~ Create Render Resources
 	CreateShaders		();
@@ -211,14 +219,14 @@ void SceneChapter7::FrameBegin(float deltaTime)
 void SceneChapter7::FrameEnd(float deltaTime)
 {
 	const auto frameIndex = Render.FrameIndex;
-	auto* mainRT	= Render.GetBackBuffer(frameIndex);
+	auto* mainRT	 = Render.GetBackBuffer(frameIndex);
 
 	D3D12_RESOURCE_BARRIER barrier{};
 	barrier.Type				   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	barrier.Transition.pResource   = mainRT;
 	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PRESENT;
-	Render.GfxCmd->ResourceBarrier(1, &barrier);
+	Render.GfxCmd->ResourceBarrier(1u, &barrier);
 
 	THROW_DX_IF_FAILS(Render.GfxCmd->Close());
 	ID3D12CommandList* cmdLists[] = { Render.GfxCmd.Get() };
@@ -238,6 +246,8 @@ void SceneChapter7::FrameEnd(float deltaTime)
 void SceneChapter7::ImguiView(const float deltaTime)
 {
 	(void)deltaTime;
+
+	m_descriptorHeap.ImguiView();
 
 	constexpr EShape kShapes[] =
 	{
@@ -269,18 +279,7 @@ void SceneChapter7::ImguiView(const float deltaTime)
 				auto& item = items[i];
 
 				ImGui::PushID(static_cast<int>(i));
-
-				const std::string itemHeader =
-					"Item " + std::to_string(i) + "##" +
-					ToString(shape) + "_" + std::to_string(i);
-
-				if (ImGui::CollapsingHeader(itemHeader.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
-				{
-					ImGui::Checkbox("Visible", &item.Visible);
-					ImGui::Separator();
-					item.Transform.ImguiView();
-				}
-
+				item.ImguiView();
 				ImGui::PopID();
 			}
 
@@ -447,14 +446,12 @@ void SceneChapter7::CreateSRVHeap()
 	if (m_bSRVHeapInitialized) return;
 	m_bSRVHeapInitialized = true;
 
-	D3D12_DESCRIPTOR_HEAP_DESC desc{};
+	framework::InitDescriptorHeap desc{};
 	desc.Flags			= D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.Type			= D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = 1024u;
-	desc.NodeMask		= 0u;
-
-	THROW_DX_IF_FAILS(Render.Device->CreateDescriptorHeap(
-			&desc, IID_PPV_ARGS(&m_SRVHeapDescriptor)));
+	desc.AllocationSize = 64u;
+	desc.pDevice		= Render.Device.Get();
+	m_descriptorHeap.Initialize(desc);
 
 	logger::success("Created Descriptor Heap Descriptor!");
 }
@@ -503,82 +500,25 @@ void SceneChapter7::CreatePipeline()
 {
 	if (m_bPipelineInitialized) return;
 	m_bPipelineInitialized = true;
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC pso{};
-	pso.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-	pso.SampleMask = UINT_MAX;
-	pso.SampleDesc.Count = 1u;
-	pso.SampleDesc.Quality = 0u;
-	pso.NodeMask = 0u;
 
-	pso.pRootSignature = m_rootSignature.Get();
+	m_pipeline.SetRootSignature(m_rootSignature.Get());
 
-	//~ set vertex shader
-	pso.VS = {
+	m_pipeline.SetVertexShader(D3D12_SHADER_BYTECODE{
 		m_vertexShaderBlob->GetBufferPointer(),
 		m_vertexShaderBlob->GetBufferSize()
-	};
+	});
 
-	//~ set pixel shader
-	pso.PS = {
+	m_pipeline.SetPixelShader(D3D12_SHADER_BYTECODE{
 		m_pixelShaderBlob->GetBufferPointer(),
 		m_pixelShaderBlob->GetBufferSize()
-	};
+	});
 
-	//~ set input layout
-	const auto& layout = MeshVertex::GetInputLayout();
-	pso.InputLayout.NumElements = layout.size();
-	pso.InputLayout.pInputElementDescs = layout.data();
+	m_pipeline.SetInputLayout(MeshVertex::GetInputLayout());
 
-	//~ Set Rasterizer Desc
-	D3D12_RASTERIZER_DESC rasterDesc{};
-	rasterDesc.FillMode				 = D3D12_FILL_MODE_SOLID;
-	rasterDesc.CullMode				 = D3D12_CULL_MODE_NONE; // TODO: Create config
-	rasterDesc.ConservativeRaster	 = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-	rasterDesc.DepthBias			 = D3D12_DEFAULT_DEPTH_BIAS;
-	rasterDesc.DepthBiasClamp		 = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-	rasterDesc.SlopeScaledDepthBias  = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-	rasterDesc.DepthClipEnable		 = true;
-	rasterDesc.FrontCounterClockwise = false;
-	rasterDesc.AntialiasedLineEnable = false;
-	rasterDesc.MultisampleEnable	 = false;
-	rasterDesc.ForcedSampleCount	 = 0u;
-	pso.RasterizerState = rasterDesc;
+	m_pipeline.SetFillMode(EFillMode::Solid);
+	m_pipeline.SetCullMode(ECullMode::None);
 
-	//~ blend
-	D3D12_BLEND_DESC blendDesc{};
-	blendDesc.AlphaToCoverageEnable  = false;
-	blendDesc.IndependentBlendEnable = false;
-	const D3D12_RENDER_TARGET_BLEND_DESC rtBlend =
-	{
-		FALSE,FALSE,
-		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
-		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
-		D3D12_LOGIC_OP_NOOP,
-		D3D12_COLOR_WRITE_ENABLE_ALL
-	};
-	for (auto& rt : blendDesc.RenderTarget) rt = rtBlend;
-	pso.BlendState = blendDesc;
-
-	// Depth-stencil
-	D3D12_DEPTH_STENCIL_DESC ds{};
-	ds.DepthEnable      = TRUE;
-	ds.DepthWriteMask   = D3D12_DEPTH_WRITE_MASK_ALL;
-	ds.DepthFunc        = D3D12_COMPARISON_FUNC_LESS;
-	ds.StencilEnable    = FALSE;
-	ds.StencilReadMask  = D3D12_DEFAULT_STENCIL_READ_MASK;
-	ds.StencilWriteMask = D3D12_DEFAULT_STENCIL_WRITE_MASK;
-	ds.FrontFace        = { D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_COMPARISON_FUNC_ALWAYS };
-	ds.BackFace         = ds.FrontFace;
-	pso.DepthStencilState = ds;
-
-	pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-
-	pso.NumRenderTargets = 1u;
-	pso.RTVFormats[0]    = Render.BackBufferFormat;
-	pso.DSVFormat        = Render.DsvFormat;
-
-	THROW_DX_IF_FAILS(Render.Device->CreateGraphicsPipelineState(
-			&pso, IID_PPV_ARGS(&m_pipeline)));
+	m_pipeline.Initialize(&Render);
 }
 
 void SceneChapter7::CreateGeometry()
@@ -598,7 +538,10 @@ void SceneChapter7::CreateGeometry()
 
 		m_geometries[EShape::Box] = MeshGeometry{};
 		const MeshData data = MeshGenerator::GenerateBox(cfg);
-		CreateSingleGeometry(m_geometries[EShape::Box], data);
+		m_geometries[EShape::Box].InitGeometryBuffer(
+			Render.Device.Get(),
+			Render.GfxCmd.Get(),
+			data, false);
 	}
 
 	// Sphere
@@ -614,7 +557,10 @@ void SceneChapter7::CreateGeometry()
 
 		m_geometries[EShape::Sphere] = MeshGeometry{};
 		const MeshData data = MeshGenerator::GenerateSphere(cfg);
-		CreateSingleGeometry(m_geometries[EShape::Sphere], data);
+		m_geometries[EShape::Sphere].InitGeometryBuffer(
+			Render.Device.Get(),
+			Render.GfxCmd.Get(),
+			data, false);
 	}
 
 	// Cylinder
@@ -634,7 +580,10 @@ void SceneChapter7::CreateGeometry()
 
 		m_geometries[EShape::Cylinder] = MeshGeometry{};
 		const MeshData data = MeshGenerator::GenerateCylinder(cfg);
-		CreateSingleGeometry(m_geometries[EShape::Cylinder], data);
+		m_geometries[EShape::Cylinder].InitGeometryBuffer(
+			Render.Device.Get(),
+			Render.GfxCmd.Get(),
+			data, false);
 	}
 
 	CreateMountain();
@@ -649,7 +598,10 @@ void SceneChapter7::CreateRenderItems()
 	{
 		RenderItem item{};
 		item.Mesh = &m_geometries[EShape::Box];
-		CreateConstantBuffer(item);
+		item.InitConstantBuffer(
+			Render.BackBufferCount,
+			Render.Device.Get(),
+			m_descriptorHeap);
 		m_renderItems[EShape::Box].emplace_back(std::move(item));
 	}
 	m_nBoxCounts = 0;
@@ -658,7 +610,10 @@ void SceneChapter7::CreateRenderItems()
 	{
 		RenderItem item{};
 		item.Mesh = &m_geometries[EShape::Cylinder];
-		CreateConstantBuffer(item);
+		item.InitConstantBuffer(
+			Render.BackBufferCount,
+			Render.Device.Get(),
+			m_descriptorHeap);
 		m_renderItems[EShape::Cylinder].emplace_back(std::move(item));
 	}
 	m_nCylinderCount = 0;
@@ -667,14 +622,20 @@ void SceneChapter7::CreateRenderItems()
 	{
 		RenderItem item{};
 		item.Mesh = &m_geometries[EShape::Sphere];
-		CreateConstantBuffer(item);
+		item.InitConstantBuffer(
+			Render.BackBufferCount,
+			Render.Device.Get(),
+			m_descriptorHeap);
 		m_renderItems[EShape::Sphere].emplace_back(std::move(item));
 	}
 	m_nSphereCount = 0;
 
 	RenderItem item{};
 	item.Mesh = &m_geometries[EShape::Mountain];
-	CreateConstantBuffer(item);
+	item.InitConstantBuffer(
+		Render.BackBufferCount,
+		Render.Device.Get(),
+		m_descriptorHeap);
 	m_renderItems[EShape::Mountain].emplace_back(std::move(item));
 
 	LoadData();
@@ -687,7 +648,10 @@ void SceneChapter7::CreateMountain()
 
 	m_geometries[EShape::Mountain] = MeshGeometry{};
 	const MeshData data = MeshGenerator::GenerateMountain(m_mountainConfig);
-	CreateSingleGeometry(m_geometries[EShape::Mountain], data);
+	m_geometries[EShape::Mountain].InitGeometryBuffer(
+		Render.Device.Get(),
+		Render.GfxCmd.Get(),
+		data, false);
 
 	if (!m_renderItems[EShape::Mountain].empty())
 	m_renderItems[EShape::Mountain][0].Mesh = &m_geometries[EShape::Mountain];
@@ -731,166 +695,6 @@ void SceneChapter7::ImguiMountainConfig()
 		m_bMountainDirty = true;
 }
 
-void SceneChapter7::CreateSingleGeometry(
-	MeshGeometry& mesh,
-	const MeshData &data) const
-{
-	const auto vertexWidth = data.vertices.size() * sizeof(MeshVertex);
-	const UINT64 vertexAligned = (vertexWidth + 3u) & ~3u;
-	const auto indexWidth = data.indices.size() * sizeof(std::uint32_t);
-	D3D12_RESOURCE_DESC resource{};
-	resource.Alignment = 0u;
-	resource.DepthOrArraySize = 1u;
-	resource.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-	resource.Flags = D3D12_RESOURCE_FLAG_NONE;
-	resource.Format = DXGI_FORMAT_UNKNOWN;
-	resource.Height = 1u;
-	resource.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-	resource.MipLevels = 1u;
-	resource.SampleDesc.Count = 1u;
-	resource.SampleDesc.Quality = 0u;
-	resource.Width = vertexAligned + indexWidth;
-
-	D3D12_HEAP_PROPERTIES properties{};
-	properties.Type = D3D12_HEAP_TYPE_DEFAULT;
-	properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-	properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-	properties.CreationNodeMask = 1u;
-	properties.VisibleNodeMask = 1u;
-
-	THROW_DX_IF_FAILS(Render.Device->CreateCommittedResource(
-		&properties, D3D12_HEAP_FLAG_NONE, &resource,
-		D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-		IID_PPV_ARGS(&mesh.GeometryBuffer)));
-
-	D3D12_HEAP_PROPERTIES uploader = properties;
-	uploader.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-	THROW_DX_IF_FAILS(Render.Device->CreateCommittedResource(
-	&uploader, D3D12_HEAP_FLAG_NONE, &resource,
-	D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-	IID_PPV_ARGS(&mesh.GeometryUploader)));
-
-	//~ attach data
-	BYTE* mapped = nullptr;
-	THROW_DX_IF_FAILS(mesh.GeometryUploader->Map(0, nullptr,
-		reinterpret_cast<void**>(&mapped)));
-
-	//~ copy data
-	std::memcpy(mapped, data.vertices.data(), vertexWidth);
-	//~ 0 padding
-	if (vertexAligned > vertexWidth)
-	{
-		std::memset(mapped + vertexWidth, 0, vertexAligned - vertexWidth);
-	}
-	std::memcpy(mapped + vertexAligned, data.indices.data(), indexWidth);
-	mesh.GeometryUploader->Unmap(0, nullptr);
-
-	//~ move data from upload to default
-	Render.GfxCmd->CopyBufferRegion(
-			mesh.GeometryBuffer.Get(),
-			0u,
-			mesh.GeometryUploader.Get(),
-			0u,
-			indexWidth + vertexAligned);
-
-	D3D12_RESOURCE_BARRIER barrier{};
-	barrier.Type					= D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-	barrier.Transition.pResource	= mesh.GeometryBuffer.Get();
-	barrier.Transition.StateBefore	= D3D12_RESOURCE_STATE_COPY_DEST;
-	barrier.Transition.StateAfter	= D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
-									| D3D12_RESOURCE_STATE_INDEX_BUFFER;
-	barrier.Transition.Subresource	= D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-	Render.GfxCmd->ResourceBarrier(1u, &barrier);
-
-	mesh.viewVertex.BufferLocation = mesh.GeometryBuffer->GetGPUVirtualAddress();
-	mesh.viewVertex.SizeInBytes = vertexWidth;
-	mesh.viewVertex.StrideInBytes = sizeof(MeshVertex);
-
-	mesh.viewIndex.BufferLocation = mesh.GeometryBuffer->GetGPUVirtualAddress() + vertexAligned;
-	mesh.viewIndex.SizeInBytes = indexWidth;
-	mesh.viewIndex.Format = DXGI_FORMAT_R32_UINT;
-
-	mesh.BaseVertexLocation = 0u;
-	mesh.IndexCount = data.indices.size();
-	mesh.StartIndexLocation = 0u;
-}
-
-void SceneChapter7::CreateConstantBuffer(RenderItem &item)
-{
-	constexpr auto perObjSize = (sizeof(PerObjectConstants) + 255u) & ~255u;
-	constexpr auto passSize = (sizeof(PassConstants) + 255u) & ~255u;
-	constexpr auto totalSize = (perObjSize + passSize) * Render.BackBufferCount;
-
-	D3D12_RESOURCE_DESC resource{};
-	resource.Format				= DXGI_FORMAT_UNKNOWN;
-	resource.Alignment			= 0u;
-	resource.DepthOrArraySize	= 1u;
-	resource.Dimension			= D3D12_RESOURCE_DIMENSION_BUFFER;
-	resource.Flags				= D3D12_RESOURCE_FLAG_NONE;
-	resource.Height				= 1u;
-	resource.Layout				= D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-	resource.MipLevels			= 1u;
-	resource.SampleDesc.Count	= 1u;
-	resource.SampleDesc.Quality = 0u;
-	resource.Width				= totalSize;
-
-	D3D12_HEAP_PROPERTIES properties{};
-	properties.Type					= D3D12_HEAP_TYPE_UPLOAD;
-	properties.CPUPageProperty		= D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-	properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-	properties.CreationNodeMask		= 1u;
-	properties.VisibleNodeMask		= 1u;
-
-	THROW_DX_IF_FAILS(Render.Device->CreateCommittedResource(
-			&properties, D3D12_HEAP_FLAG_NONE, &resource,
-			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-			IID_PPV_ARGS(&item.ConstantBuffer)));
-
-	std::uint32_t offset = 0;
-	BYTE* mapped = nullptr;
-	THROW_DX_IF_FAILS(item.ConstantBuffer->Map(0u, nullptr,
-		reinterpret_cast<void**>(&mapped)));
-
-	for (int i = 0; i < Render.BackBufferCount; i++)
-	{
-		//~ per object desc
-		D3D12_CONSTANT_BUFFER_VIEW_DESC desc{};
-		desc.BufferLocation = item.ConstantBuffer->GetGPUVirtualAddress() + offset;
-		desc.SizeInBytes = perObjSize;
-
-		auto cpuHandle = m_SRVHeapDescriptor->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += m_allocated * Render.HeapSizes.SRV;
-		auto gpuHandle = m_SRVHeapDescriptor->GetGPUDescriptorHandleForHeapStart();
-		gpuHandle.ptr += m_allocated * Render.HeapSizes.SRV;
-
-		item.BaseCBHandle.push_back(gpuHandle);
-
-		Render.Device->CreateConstantBufferView(&desc, cpuHandle);
-		item.PerObject.View.push_back(desc);
-		item.PerObject.Mapped.emplace_back(mapped + offset);
-
-		//~ step
-		offset += perObjSize;
-		++m_allocated;
-
-		//~ pass constant
-		desc.BufferLocation = item.ConstantBuffer->GetGPUVirtualAddress() + offset;
-		desc.SizeInBytes = passSize;
-
-		cpuHandle = m_SRVHeapDescriptor->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += m_allocated * Render.HeapSizes.SRV;
-
-		Render.Device->CreateConstantBufferView(&desc, cpuHandle);
-		item.PassConstant.View.push_back(desc);
-		item.PassConstant.Mapped.emplace_back(mapped + offset);
-
-		//~ step
-		offset += passSize;
-		++m_allocated;
-	}
-}
-
 void SceneChapter7::UpdateConstantBuffer(const float deltaTime)
 {
 	m_globalPassConstant.DeltaTime = deltaTime;
@@ -901,7 +705,7 @@ void SceneChapter7::UpdateConstantBuffer(const float deltaTime)
 		for (auto& renderItem : vec)
 		{
 			const auto index = renderItem.FrameIndex;
-			PerObjectConstants per{};
+			PerObjectConstantsCPU per{};
 			const auto world = renderItem.Transform.GetTransform();
 
 			DirectX::XMStoreFloat4x4(
@@ -922,11 +726,11 @@ void SceneChapter7::UpdateConstantBuffer(const float deltaTime)
 
 void SceneChapter7::DrawRenderItems()
 {
-	ID3D12DescriptorHeap* heaps[] = { m_SRVHeapDescriptor.Get() };
+	ID3D12DescriptorHeap* heaps[] = { m_descriptorHeap.GetNative() };
 	Render.GfxCmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
 	Render.GfxCmd->SetGraphicsRootSignature(m_rootSignature.Get());
-	Render.GfxCmd->SetPipelineState(m_pipeline.Get());
+	Render.GfxCmd->SetPipelineState(m_pipeline.GetNative());
 
 	for (auto &items: m_renderItems | std::views::values)
 	{
@@ -938,11 +742,11 @@ void SceneChapter7::DrawRenderItems()
 			{
 				Render.GfxCmd->SetGraphicsRootDescriptorTable(
 						0u, item.BaseCBHandle[index]);
-
-				const D3D12_VERTEX_BUFFER_VIEW vbViews[]{ item.Mesh->viewVertex };
-				Render.GfxCmd->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-				Render.GfxCmd->IASetIndexBuffer(&item.Mesh->viewIndex);
-				Render.GfxCmd->IASetVertexBuffers(0u, 1u, vbViews);
+				const auto prim = GetTopologyType(item.PrimitiveMode);
+				Render.GfxCmd->IASetPrimitiveTopology(prim);
+				Render.GfxCmd->IASetIndexBuffer(&item.Mesh->IndexViews);
+				Render.GfxCmd->IASetVertexBuffers(0u, item.Mesh->VertexViews.size(),
+					item.Mesh->VertexViews.data());
 
 				Render.GfxCmd->DrawIndexedInstanced(
 						item.Mesh->IndexCount,

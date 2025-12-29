@@ -153,21 +153,40 @@ struct GenerateCylinderConfig
 	bool InsideOut{ false };
 };
 
+struct GenerateGridConfig
+{
+	float Width{ 1.0f };
+	float Depth{ 1.0f };
+
+	// Number of quads in each direction
+	uint32_t SubdivisionsX{ 10 };
+	uint32_t SubdivisionsZ{ 10 };
+
+	DirectX::XMFLOAT3 Color{ 1.f, 1.f, 1.f };
+
+	// Grid plane orientation
+	DirectX::XMFLOAT3 Normal{ 0.f, 1.f, 0.f };
+
+	bool GenerateTangents{ true };
+	bool FlipWinding{ false };
+	bool Centered{ true };
+};
+
 // MeshGenerator
 class MeshGenerator
 {
 public:
 	//~ Primitives
-	static MeshData GenerateBox(const GenerateBoxConfig& config);
-	static MeshData GenerateMountain(const GenerateMountainConfig& config);
-	static MeshData GenerateSphere(const GenerateSphereConfig& config);
-	static MeshData GenerateCylinder(const GenerateCylinderConfig& config);
-
+	static MeshData GenerateBox		(const GenerateBoxConfig&		config);
+	static MeshData GenerateMountain(const GenerateMountainConfig&	config);
+	static MeshData GenerateSphere	(const GenerateSphereConfig&	config);
+	static MeshData GenerateCylinder(const GenerateCylinderConfig&	config);
+	static MeshData GenerateGrid	(const GenerateGridConfig&		config);
 	//~ Utilities
-	static void ComputeNormals(MeshData& mesh, bool flip = false);
-	static void ComputeTangents(MeshData& mesh, bool flip = false);
-	static void Transform(MeshData& mesh, DirectX::CXMMATRIX M);
-	static void Append(MeshData& dst, const MeshData& src);
+	static void ComputeNormals	(MeshData& mesh, bool flip = false);
+	static void ComputeTangents	(MeshData& mesh, bool flip = false);
+	static void Transform		(MeshData& mesh, DirectX::CXMMATRIX M);
+	static void Append			(MeshData& dst,  const MeshData& src);
 };
 
 #endif // DIRECTX12_MESH_GENERATOR_H

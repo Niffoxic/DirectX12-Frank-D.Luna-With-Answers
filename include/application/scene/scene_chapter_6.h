@@ -40,6 +40,9 @@
 #include <DirectXMath.h>
 #include <DirectXPackedVector.h>
 
+#include "framework/render_manager/components/pipeline.h"
+#include "framework/render_manager/components/render_item.h"
+
 struct Vertex
 {
 	DirectX::XMFLOAT3 Position;
@@ -194,96 +197,6 @@ struct Constants
 	float ApplyPulse;
 	float padding[3];
 };
-
-enum class EPrimitiveMode : std::uint8_t
-{
-    PointList      = 0,
-    LineStrip      = 1,
-    LineList       = 2,
-    TriangleStrip  = 3,
-    TriangleList   = 4,
-};
-
-inline static D3D_PRIMITIVE_TOPOLOGY GetTopologyType(const EPrimitiveMode mode)
-{
-    switch (mode)
-    {
-    case EPrimitiveMode::PointList:     return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
-    case EPrimitiveMode::LineStrip:     return D3D_PRIMITIVE_TOPOLOGY_LINESTRIP;
-    case EPrimitiveMode::LineList:      return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
-    case EPrimitiveMode::TriangleStrip: return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
-    case EPrimitiveMode::TriangleList:  return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-    default:                           return D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
-    }
-}
-
-inline static std::string ToString(const EPrimitiveMode mode)
-{
-    switch (mode)
-    {
-    case EPrimitiveMode::PointList:     return "PointList";
-    case EPrimitiveMode::LineStrip:     return "LineStrip";
-    case EPrimitiveMode::LineList:      return "LineList";
-    case EPrimitiveMode::TriangleStrip: return "TriangleStrip";
-    case EPrimitiveMode::TriangleList:  return "TriangleList";
-    default:                           return "Unknown";
-    }
-}
-
-enum class EFillMode : std::uint8_t
-{
-    WireFrame = 0,
-    Solid,
-};
-
-inline static D3D12_FILL_MODE GetFillMode(const EFillMode mode)
-{
-    switch (mode)
-    {
-    case EFillMode::WireFrame: return D3D12_FILL_MODE_WIREFRAME;
-    case EFillMode::Solid:     return D3D12_FILL_MODE_SOLID;
-    default:                  return D3D12_FILL_MODE_SOLID;
-    }
-}
-
-inline static std::string ToString(const EFillMode mode)
-{
-    switch (mode)
-    {
-    case EFillMode::WireFrame: return "WireFrame";
-    case EFillMode::Solid:     return "Solid";
-    default:                  return "Unknown";
-    }
-}
-
-enum class ECullMode : std::uint8_t
-{
-    None,
-    Front,
-    Back
-};
-
-inline static D3D12_CULL_MODE GetCullMode(const ECullMode mode)
-{
-    switch (mode)
-    {
-    case ECullMode::None:  return D3D12_CULL_MODE_NONE;
-    case ECullMode::Front: return D3D12_CULL_MODE_FRONT;
-    case ECullMode::Back:  return D3D12_CULL_MODE_BACK;
-    default:               return D3D12_CULL_MODE_BACK;
-    }
-}
-
-inline static std::string ToString(const ECullMode mode)
-{
-    switch (mode)
-    {
-    case ECullMode::None:  return "None";
-    case ECullMode::Front: return "Front";
-    case ECullMode::Back:  return "Back";
-    default:               return "Unknown";
-    }
-}
 
 class SceneChapter6 final: public IScene
 {

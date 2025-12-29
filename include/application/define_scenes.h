@@ -40,9 +40,13 @@
 #include "scene/scene_chapter_4.h"
 #include "scene/scene_chapter_6.h"
 #include "scene/scene_chapter_7.h"
+#include "scene/scene_chapter_8.h"
+#include "scene/scene_testAnim.h"
 
 REGISTER_SCENE(SceneChapter4);
 REGISTER_SCENE(SceneChapter6);
 REGISTER_SCENE(SceneChapter7);
+REGISTER_SCENE(SceneChapter8);
+REGISTER_SCENE(TestAnim);
 
 #endif //DIRECTX12_DEFINE_SCENES_H

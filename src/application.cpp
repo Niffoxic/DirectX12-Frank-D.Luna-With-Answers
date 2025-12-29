@@ -81,6 +81,8 @@ bool framework::Application::InitApplication()
 		m_scenes.emplace_back(std::move(RegistryScene::CreateScene(name, m_renderManager)));
 	}
 
+	for (const auto& scene: m_scenes) scene->Initialize();
+
 	if (m_scenes.empty())
 	{
 		m_activeSceneIndex = 0u;

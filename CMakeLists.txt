@@ -41,6 +41,19 @@ target_link_libraries(imgui PUBLIC
 
 add_library(imgui::imgui ALIAS imgui)
 
+# add assimp
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+        assimp
+        GIT_REPOSITORY https://github.com/assimp/assimp.git
+        GIT_TAG        v6.0.2
+)
+FetchContent_MakeAvailable(assimp)
+
 # Application
 add_executable(application WIN32
         include/utility/logger.h
@@ -84,6 +97,18 @@ add_executable(application WIN32
         src/scene_chapter_7.cpp
         include/utility/mesh_generator.h
         src/mesh_generator.cpp
+        include/application/scene/scene_chapter_8.h
+        src/scene_chapter_8.cpp
+        include/framework/render_manager/components/render_item.h
+        src/render_item.cpp
+        include/framework/render_manager/components/decriptor_heap.h
+        src/descriptor_heap.cpp
+        include/framework/render_manager/components/pipeline.h
+        src/pipeline.cpp
+        include/application/scene/scene_testAnim.h
+        src/scene_testAnim.cpp
+        include/framework/animation/anim.h
+        src/anim.cpp
 )
 
 target_compile_definitions(application PRIVATE
@@ -99,6 +124,7 @@ target_include_directories(application PRIVATE
 
 target_link_libraries(application PRIVATE
         imgui::imgui
+        assimp::assimp
         user32
         dxgi
         d3d12
@@ -106,9 +132,26 @@ target_link_libraries(application PRIVATE
         D3DCompiler
 )
 
+# Runtime copies
+
 # Copy shaders
 add_custom_command(TARGET application POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
         "$<TARGET_FILE_DIR:application>/shaders"
 )
+
+# Copy assets
+add_custom_command(TARGET application POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:application>/assets"
+)
+
+if (WIN32)
+    add_custom_command(TARGET application POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:assimp::assimp>
+            $<TARGET_FILE_DIR:application>
+    )
+endif()

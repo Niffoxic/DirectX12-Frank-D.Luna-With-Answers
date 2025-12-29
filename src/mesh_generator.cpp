@@ -640,7 +640,93 @@ MeshData MeshGenerator::GenerateCylinder(const GenerateCylinderConfig& config)
     return mesh;
 }
 
-void MeshGenerator::ComputeNormals(MeshData& mesh, bool flip)
+MeshData MeshGenerator::GenerateGrid(const GenerateGridConfig& config)
+{
+	MeshData mesh{};
+
+	const uint32_t xQuads = std::max(1u, config.SubdivisionsX);
+	const uint32_t zQuads = std::max(1u, config.SubdivisionsZ);
+
+	const uint32_t xVerts = xQuads + 1;
+	const uint32_t zVerts = zQuads + 1;
+
+	const float halfW = 0.5f * config.Width;
+	const float halfD = 0.5f * config.Depth;
+
+	const float dx = (xQuads > 0) ? (config.Width / float(xQuads)) : 0.0f;
+	const float dz = (zQuads > 0) ? (config.Depth / float(zQuads)) : 0.0f;
+
+	// Vertex count
+	mesh.vertices.resize(static_cast<size_t>(xVerts) * static_cast<size_t>(zVerts));
+
+	// Build vertices on XZ plane
+	for (uint32_t z = 0; z < zVerts; ++z)
+	{
+		const float vz = static_cast<float>(z) / static_cast<float>(zQuads); // 0..1
+		const float posZ = config.Centered ? (-halfD + vz * config.Depth) : (vz * config.Depth);
+
+		for (uint32_t x = 0; x < xVerts; ++x)
+		{
+			const float vx = static_cast<float>(x) / static_cast<float>(xQuads); // 0..1
+			const float posX = config.Centered ? (-halfW + vx * config.Width) : (vx * config.Width);
+
+			MeshVertex v{};
+			v.Position = XMFLOAT3(posX, 0.0f, posZ);
+			v.UV       = XMFLOAT2(vx, 1.0f - vz);
+			v.Color    = config.Color;
+
+			// Default normal/tangent (XZ plane)
+			v.Normal  = config.Normal;
+			v.Tangent = XMFLOAT3(1.f, 0.f, 0.f);
+
+			mesh.vertices[static_cast<size_t>(z) * static_cast<size_t>(xVerts) + static_cast<size_t>(x)] = v;
+		}
+	}
+
+	const uint32_t quadCount = xQuads * zQuads;
+	mesh.indices.reserve(static_cast<size_t>(quadCount) * 6ull);
+
+	for (uint32_t z = 0; z < zQuads; ++z)
+	{
+		for (uint32_t x = 0; x < xQuads; ++x)
+		{
+			const uint32_t i0 = (z * xVerts) + x;
+			const uint32_t i1 = (z * xVerts) + (x + 1);
+			const uint32_t i2 = ((z + 1) * xVerts) + x;
+			const uint32_t i3 = ((z + 1) * xVerts) + (x + 1);
+
+			if (!config.FlipWinding)
+			{
+				mesh.indices.push_back(i0);
+				mesh.indices.push_back(i1);
+				mesh.indices.push_back(i2);
+
+				mesh.indices.push_back(i2);
+				mesh.indices.push_back(i1);
+				mesh.indices.push_back(i3);
+			}
+			else
+			{
+				mesh.indices.push_back(i0);
+				mesh.indices.push_back(i2);
+				mesh.indices.push_back(i1);
+
+				mesh.indices.push_back(i2);
+				mesh.indices.push_back(i3);
+				mesh.indices.push_back(i1);
+			}
+		}
+	}
+
+	ComputeNormals(mesh, false);
+
+	if (config.GenerateTangents)
+		ComputeTangents(mesh, false);
+
+	return mesh;
+}
+
+void MeshGenerator::ComputeNormals(MeshData& mesh, const bool flip)
 {
     auto& v = mesh.vertices;
     const auto& idx = mesh.indices;
