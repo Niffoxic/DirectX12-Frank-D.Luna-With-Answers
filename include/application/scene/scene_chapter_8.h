@@ -46,6 +46,7 @@
 enum class ERenderType: std::uint32_t
 {
 	River,
+	Mountain,
 };
 
 inline std::string ToString(const ERenderType &type)
@@ -53,6 +54,8 @@ inline std::string ToString(const ERenderType &type)
 	switch (type)
 	{
 		case ERenderType::River: return "River";
+		case ERenderType::Mountain: return "Mountain";
+		default: return "Unknown";
 	}
 	return "Unknown";
 }
@@ -124,6 +127,7 @@ private:
 	void CreatePipeline		 ();
 	void CreateGeometry		 ();
 	void CreateRenderItems	 ();
+	void CreateMaterials	 ();
 
 	void UpdateConstantBuffer(float deltaTime);
 	void DrawRenderItems();
@@ -132,6 +136,9 @@ private:
 	void UpdateRiver(float deltaTime);
 
 private:
+	//~ light
+	LightManager m_lightManager{};
+
     //~ common
     HANDLE m_waitEvent;
 	std::vector<std::uint64_t> m_rtProtectedFenceValue;
@@ -169,13 +176,16 @@ private:
 	bool m_bPipelineInitialized		{ false };
 	framework::Pipeline m_pipeline	{};
 
+	//~ config materials
+	bool m_bMaterialsInitialized{ false };
+	std::unordered_map<ERenderType, Material> m_materials{};
+
     //~ configs
 	PassConstantsCPU m_globalPassConstant{};
 	DirectX::XMFLOAT4X4 m_view{};
 	DirectX::XMFLOAT4X4 m_proj{};
 	float m_lastPrinted{ 5.f };
 	float m_totalTime  { 0.0f };
-
 };
 
 #endif //DIRECTX12_SCENE_CHAPTER_8_H

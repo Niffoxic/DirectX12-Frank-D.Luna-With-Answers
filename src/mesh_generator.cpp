@@ -728,35 +728,60 @@ MeshData MeshGenerator::GenerateGrid(const GenerateGridConfig& config)
 
 void MeshGenerator::ComputeNormals(MeshData& mesh, const bool flip)
 {
-    auto& v = mesh.vertices;
-    const auto& idx = mesh.indices;
+    if (mesh.vertices.empty() || mesh.indices.size() < 3)
+        return;
 
-    for (auto& vert : v)
-        vert.Normal = { 0.f, 0.f, 0.f };
+    // clear normals
+    for (auto& v : mesh.vertices)
+        v.Normal = { 0.f, 0.f, 0.f };
 
-    for (size_t i = 0; i + 2 < idx.size(); i += 3)
+    // accumulate face normals
+    const size_t triCount = mesh.indices.size() / 3;
+    for (size_t t = 0; t < triCount; ++t)
     {
-        const uint32_t i0 = idx[i + 0];
-        const uint32_t i1 = idx[i + 1];
-        const uint32_t i2 = idx[i + 2];
+        const uint32_t i0 = mesh.indices[t * 3 + 0];
+        const uint32_t i1 = mesh.indices[t * 3 + 1];
+        const uint32_t i2 = mesh.indices[t * 3 + 2];
 
-        const XMFLOAT3& p0 = v[i0].Position;
-        const XMFLOAT3& p1 = v[i1].Position;
-        const XMFLOAT3& p2 = v[i2].Position;
+        const auto& p0 = mesh.vertices[i0].Position;
+        const auto& p1 = mesh.vertices[i1].Position;
+        const auto& p2 = mesh.vertices[i2].Position;
 
-        const XMFLOAT3 e0 = Sub3(p1, p0);
-        const XMFLOAT3 e1 = Sub3(p2, p0);
+        const DirectX::XMVECTOR P0 = DirectX::XMLoadFloat3(&p0);
+        const DirectX::XMVECTOR P1 = DirectX::XMLoadFloat3(&p1);
+        const DirectX::XMVECTOR P2 = DirectX::XMLoadFloat3(&p2);
 
-        XMFLOAT3 n = Cross3(e0, e1); // area-weighted
-        if (flip) n = Mul3(n, -1.0f);
+        DirectX::XMVECTOR e1 = DirectX::XMVectorSubtract(P1, P0);
+        DirectX::XMVECTOR e2 = DirectX::XMVectorSubtract(P2, P0);
 
-        Accum3(v[i0].Normal, n);
-        Accum3(v[i1].Normal, n);
-        Accum3(v[i2].Normal, n);
+        DirectX::XMVECTOR n = flip
+            ? DirectX::XMVector3Cross(e2, e1)
+            : DirectX::XMVector3Cross(e1, e2);
+
+        // If triangle is degenerate, skip
+        if (DirectX::XMVectorGetX(DirectX::XMVector3LengthSq(n)) < 1e-12f)
+            continue;
+
+        DirectX::XMFLOAT3 fn{};
+        DirectX::XMStoreFloat3(&fn, n);
+
+        auto add = [](DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b)
+        {
+            a.x += b.x; a.y += b.y; a.z += b.z;
+        };
+
+        add(mesh.vertices[i0].Normal, fn);
+        add(mesh.vertices[i1].Normal, fn);
+        add(mesh.vertices[i2].Normal, fn);
     }
 
-    for (auto& vert : v)
-        vert.Normal = Normalize3(vert.Normal);
+    // normalize vertex normals
+    for (auto& v : mesh.vertices)
+    {
+        DirectX::XMVECTOR N = DirectX::XMLoadFloat3(&v.Normal);
+        N = DirectX::XMVector3Normalize(N);
+        DirectX::XMStoreFloat3(&v.Normal, N);
+    }
 }
 
 void MeshGenerator::ComputeTangents(MeshData& mesh, bool flip)

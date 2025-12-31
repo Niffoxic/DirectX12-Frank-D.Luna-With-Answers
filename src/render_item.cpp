@@ -36,6 +36,22 @@
 #include "framework/exception/dx_exception.h"
 #include "imgui.h"
 
+static inline void Normalize3(DirectX::XMFLOAT3& v)
+{
+	const float x = v.x, y = v.y, z = v.z;
+	const float lenSq = x*x + y*y + z*z;
+	if (lenSq > 1e-8f)
+	{
+		const float invLen = 1.0f / std::sqrt(lenSq);
+		v.x *= invLen; v.y *= invLen; v.z *= invLen;
+	}
+}
+
+static inline void ImGuiEditVec3(const char* label, DirectX::XMFLOAT3& v, float speed, float minV, float maxV)
+{
+	ImGui::DragFloat3(label, &v.x, speed, minV, maxV);
+}
+
 DirectX::XMFLOAT4X4 Transformation::GetTransform() const
 {
 	using namespace DirectX;
@@ -174,6 +190,310 @@ void MeshGeometry::InitGeometryBuffer(
 	IndexViews.SizeInBytes	  = ibSize;
 
 	IndexCount = mesh.indices.size();
+}
+
+LightCPU & LightManager::AddDirectional(const DirectX::XMFLOAT3 &direction,
+	const DirectX::XMFLOAT3 &strength)
+{
+	LightCPU light{};
+	light.Direction = direction;
+	light.Strength  = strength;
+
+	DirectionalLights.push_back(light);
+	return DirectionalLights.back();
+}
+
+LightCPU & LightManager::AddPoint(const DirectX::XMFLOAT3 &position,
+	const DirectX::XMFLOAT3 &strength,
+	float falloffStart, float falloffEnd)
+{
+	LightCPU light{};
+	light.Position     = position;
+	light.Strength     = strength;
+	light.FalloffStart = falloffStart;
+	light.FalloffEnd   = falloffEnd;
+
+	PointLights.push_back(light);
+	return PointLights.back();
+}
+
+LightCPU & LightManager::AddSpot(const DirectX::XMFLOAT3 &position,
+	const DirectX::XMFLOAT3 &direction,
+	const DirectX::XMFLOAT3 &strength, float falloffStart, float falloffEnd,
+	float spotPower)
+{
+	LightCPU light{};
+	light.Position     = position;
+	light.Direction    = direction;
+	light.Strength     = strength;
+	light.FalloffStart = falloffStart;
+	light.FalloffEnd   = falloffEnd;
+	light.SpotPower    = spotPower;
+
+	SpotLights.push_back(light);
+	return SpotLights.back();
+}
+
+void LightManager::Clear()
+{
+	DirectionalLights.clear();
+	PointLights.clear();
+	SpotLights.clear();
+}
+
+std::uint32_t LightManager::TotalLightCount() const
+{
+	return static_cast<std::uint32_t>(
+	DirectionalLights.size() +
+	PointLights.size() +
+	SpotLights.size());
+}
+
+void LightManager::FillPassConstants(PassConstantsCPU &out) const
+{
+	out.NumDirLights   = 0;
+	out.NumPointLights = 0;
+	out.NumSpotLights  = 0;
+
+	std::uint32_t index = 0;
+
+	// Directional lights first
+	for (const auto& l : DirectionalLights)
+	{
+		if (index >= MaxLights) break;
+		out.Lights[index++] = l;
+		out.NumDirLights++;
+	}
+
+	// Point lights next
+	for (const auto& l : PointLights)
+	{
+		if (index >= MaxLights) break;
+		out.Lights[index++] = l;
+		out.NumPointLights++;
+	}
+
+	// Spot lights last
+	for (const auto& l : SpotLights)
+	{
+		if (index >= MaxLights) break;
+		out.Lights[index++] = l;
+		out.NumSpotLights++;
+	}
+
+	// Clear unused slots (important!)
+	for (; index < MaxLights; ++index)
+	{
+		out.Lights[index] = {};
+	}
+}
+
+void LightManager::ImguiView()
+{
+	ImGui::PushID(this);
+
+	if (!ImGui::CollapsingHeader("Light Manager", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::PopID();
+		return;
+	}
+
+	ImGui::Indent();
+
+	ImGui::Text("Total: %u (Packed Max: %u)", TotalLightCount(), MaxLights);
+
+	// Add buttons
+	if (ImGui::Button("+ Directional"))
+	{
+		AddDirectional({ 0.0f, -1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f });
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("+ Point"))
+	{
+		AddPoint({ 0.0f, 2.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, 1.0f, 10.0f);
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("+ Spot"))
+	{
+		AddSpot({ 0.0f, 2.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, 1.0f, 15.0f, 64.0f);
+	}
+
+	ImGui::Separator();
+
+	auto DrawList = [&](const char* title, std::vector<LightCPU>& list, ELightType type)
+	{
+		std::string header = std::string(title) + " (" + std::to_string(list.size()) + ")";
+		if (!ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+			return;
+
+		ImGui::Indent();
+
+		for (int i = 0; i < (int)list.size(); ++i)
+		{
+			ImGui::PushID(i);
+
+			char label[64]{};
+			std::snprintf(label, sizeof(label), "%s %d", title, i);
+
+			if (ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen))
+			{
+				auto& l = list[static_cast<size_t>(i)];
+
+				ImGuiEditVec3("Strength", l.Strength, 0.01f, 0.0f, 10000.0f);
+
+				if (type == ELightType::Directional || type == ELightType::Spotlight)
+				{
+					ImGuiEditVec3("Direction", l.Direction, 0.01f, -1.0f, 1.0f);
+					ImGui::SameLine();
+					if (ImGui::Button("Normalize##Dir"))
+						Normalize3(l.Direction);
+				}
+
+				if (type == ELightType::Point || type == ELightType::Spotlight)
+				{
+					ImGuiEditVec3("Position", l.Position, 0.05f, -100000.0f, 100000.0f);
+
+					ImGui::DragFloat("FalloffStart", &l.FalloffStart, 0.05f, 0.0f, 100000.0f);
+					ImGui::DragFloat("FalloffEnd",   &l.FalloffEnd,   0.05f, 0.0f, 100000.0f);
+
+					if (l.FalloffEnd < l.FalloffStart)
+						l.FalloffEnd = l.FalloffStart;
+				}
+
+				if (type == ELightType::Spotlight)
+				{
+					ImGui::DragFloat("SpotPower", &l.SpotPower, 1.0f, 1.0f, 512.0f);
+				}
+
+				ImGui::Separator();
+
+				if (ImGui::Button("Remove"))
+				{
+					list.erase(list.begin() + i);
+					ImGui::TreePop();
+					ImGui::PopID();
+					break;
+				}
+
+				ImGui::TreePop();
+			}
+
+			ImGui::PopID();
+		}
+
+		ImGui::Unindent();
+	};
+
+	DrawList("Directional", DirectionalLights, ELightType::Directional);
+	DrawList("Point",       PointLights,       ELightType::Point);
+	DrawList("Spotlight",   SpotLights,        ELightType::Spotlight);
+
+	ImGui::Unindent();
+	ImGui::PopID();
+}
+
+JsonLoader LightManager::GetJsonData() const
+{
+	JsonLoader saver{};
+
+	auto WriteVec3 = [&](JsonLoader& node, const char* k, const DirectX::XMFLOAT3& v)
+	{
+		node[k]["X"] = v.x;
+		node[k]["Y"] = v.y;
+		node[k]["Z"] = v.z;
+	};
+
+	auto WriteLight = [&](JsonLoader& node, const LightCPU& l)
+	{
+		WriteVec3(node, "Strength",  l.Strength);
+		node["FalloffStart"] = l.FalloffStart;
+
+		WriteVec3(node, "Direction", l.Direction);
+		node["FalloffEnd"] = l.FalloffEnd;
+
+		WriteVec3(node, "Position",  l.Position);
+		node["SpotPower"] = l.SpotPower;
+	};
+
+	auto WriteList = [&](const char* listKey, const std::vector<LightCPU>& list)
+	{
+		auto& root = saver["Lights"][listKey];
+		root["Count"] = static_cast<int>(list.size());
+
+		for (size_t i = 0; i < list.size(); ++i)
+		{
+			const std::string itemKey = "Item_" + std::to_string(i);
+			auto& n = root[itemKey];
+			WriteLight(n, list[i]);
+		}
+	};
+
+	WriteList("Directional", DirectionalLights);
+	WriteList("Point",       PointLights);
+	WriteList("Spot",        SpotLights);
+
+	return saver;
+}
+
+void LightManager::LoadJsonData(const JsonLoader& data)
+{
+	auto ReadVec3 = [](const JsonLoader& node, const char* key, const DirectX::XMFLOAT3& def) -> DirectX::XMFLOAT3
+	{
+		if (!node.Has(key)) return def;
+
+		const auto& v = node[key];
+		if (!v.Has("X") || !v.Has("Y") || !v.Has("Z")) return def;
+
+		return DirectX::XMFLOAT3(
+			v["X"].AsFloat(def.x),
+			v["Y"].AsFloat(def.y),
+			v["Z"].AsFloat(def.z)
+		);
+	};
+
+	auto ReadLight = [&](const JsonLoader& node) -> LightCPU
+	{
+		LightCPU l{};
+
+		l.Strength     = ReadVec3(node, "Strength",  DirectX::XMFLOAT3(1.f, 1.f, 1.f));
+		l.FalloffStart = node.Has("FalloffStart") ? node["FalloffStart"].AsFloat(0.0f) : 0.0f;
+
+		l.Direction    = ReadVec3(node, "Direction", DirectX::XMFLOAT3(0.f, -1.f, 0.f));
+		l.FalloffEnd   = node.Has("FalloffEnd") ? node["FalloffEnd"].AsFloat(0.0f) : 0.0f;
+
+		l.Position     = ReadVec3(node, "Position",  DirectX::XMFLOAT3(0.f, 0.f, 0.f));
+		l.SpotPower    = node.Has("SpotPower") ? node["SpotPower"].AsFloat(64.0f) : 64.0f;
+
+		return l;
+	};
+
+	auto ReadList = [&](const char* listKey, std::vector<LightCPU>& outList)
+	{
+		outList.clear();
+
+		if (!data.Has("Lights")) return;
+		const auto& lightsRoot = data["Lights"];
+
+		if (!lightsRoot.Has(listKey)) return;
+		const auto& root = lightsRoot[listKey];
+
+		const int count = root.Has("Count") ? root["Count"].AsInt(0) : 0;
+		if (count <= 0) return;
+
+		outList.reserve(static_cast<size_t>(count));
+
+		for (int i = 0; i < count; ++i)
+		{
+			const std::string itemKey = "Item_" + std::to_string(i);
+			if (!root.Has(itemKey)) continue;
+
+			outList.push_back(ReadLight(root[itemKey]));
+		}
+	};
+
+	ReadList("Directional", DirectionalLights);
+	ReadList("Point",       PointLights);
+	ReadList("Spot",        SpotLights);
 }
 
 void RenderItem::InitConstantBuffer(
@@ -324,4 +644,141 @@ void RenderItem::ImguiView()
 	}
 
 	ImGui::PopID();
+}
+
+void Material::ImguiView()
+{
+	ImGui::PushID(this);
+
+	if (const char* headerLabel = Name.empty() ? "Material" : Name.c_str();
+		ImGui::CollapsingHeader(headerLabel, ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::Indent();
+
+		// Identity / indices
+		{
+			char nameBuffer[128]{};
+			if (!Name.empty())
+				std::snprintf(nameBuffer, sizeof(nameBuffer), "%s", Name.c_str());
+
+			if (ImGui::InputText("Name", nameBuffer, sizeof(nameBuffer)))
+				Name = nameBuffer;
+
+			// Indices / state
+			ImGui::InputScalar("SRV Heap Index", ImGuiDataType_U32, &SrvHeapIndex);
+			ImGui::InputScalar("Num Frames", ImGuiDataType_U32, &FrameCount);
+		}
+
+		ImGui::Separator();
+
+		// Constant data
+		{
+			ImGui::TextUnformatted("Constant Data");
+
+			ImGui::ColorEdit4("Diffuse Albedo", &Config.DiffuseAlbedo.x);
+
+			ImGui::ColorEdit3("Fresnel R0", &Config.FresnelR0.x);
+			ImGui::SliderFloat("Roughness", &Config.Roughness, 0.0f, 1.0f);
+
+			if (ImGui::TreeNodeEx("Mat Transform", ImGuiTreeNodeFlags_DefaultOpen))
+			{
+				float* m = &Config.MatTransform._11;
+
+				// Display/edit rows (row-major in memory for XMFLOAT4X4)
+				ImGui::DragFloat4("Row 0", m + 0, 0.01f);
+				ImGui::DragFloat4("Row 1", m + 4, 0.01f);
+				ImGui::DragFloat4("Row 2", m + 8, 0.01f);
+				ImGui::DragFloat4("Row 3", m + 12, 0.01f);
+
+				// Quick buttons
+				if (ImGui::Button("Identity"))
+				{
+					Config.MatTransform = DirectX::XMFLOAT4X4(
+						1.f, 0.f, 0.f, 0.f,
+						0.f, 1.f, 0.f, 0.f,
+						0.f, 0.f, 1.f, 0.f,
+						0.f, 0.f, 0.f, 1.f
+					);
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Zero"))
+				{
+					Config.MatTransform = DirectX::XMFLOAT4X4(
+						0.f, 0.f, 0.f, 0.f,
+						0.f, 0.f, 0.f, 0.f,
+						0.f, 0.f, 0.f, 0.f,
+						0.f, 0.f, 0.f, 0.f
+					);
+				}
+
+				ImGui::TreePop();
+			}
+		}
+
+		ImGui::Unindent();
+	}
+
+	ImGui::PopID();
+}
+
+void Material::InitPixelConstantBuffer(
+	const std::uint32_t frameCount,
+	ID3D12Device *device,
+	framework::DescriptorHeap &heap)
+{
+	constexpr std::uint32_t resourceSize = (sizeof(Material::MaterialConstants) + 255u) & ~255u;
+	const std::uint32_t totalSize		 = resourceSize * frameCount;
+	if (!totalSize) return;
+
+	D3D12_RESOURCE_DESC resource{};
+	resource.Alignment			= 0u;
+	resource.DepthOrArraySize	= 1u;
+	resource.Dimension			= D3D12_RESOURCE_DIMENSION_BUFFER;
+	resource.Flags				= D3D12_RESOURCE_FLAG_NONE;
+	resource.Format				= DXGI_FORMAT_UNKNOWN;
+	resource.Height				= 1u;
+	resource.Layout				= D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	resource.MipLevels			= 1u;
+	resource.SampleDesc.Count	= 1u;
+	resource.SampleDesc.Quality = 0u;
+	resource.Width				= totalSize;
+
+	D3D12_HEAP_PROPERTIES properties{};
+	properties.Type					= D3D12_HEAP_TYPE_UPLOAD;
+	properties.CPUPageProperty		= D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+	properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+	properties.CreationNodeMask		= 1u;
+	properties.VisibleNodeMask		= 1u;
+
+	THROW_DX_IF_FAILS(device->CreateCommittedResource(
+			&properties, D3D12_HEAP_FLAG_NONE, &resource,
+			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+			IID_PPV_ARGS(&PixelConstantBuffer)
+		));
+
+	BYTE* mapped{ nullptr };
+	THROW_DX_IF_FAILS(PixelConstantBuffer->Map(0u, nullptr,
+		reinterpret_cast<void**>(&mapped)));
+
+	std::uint32_t offset = 0;
+	std::uint32_t startIndex = heap.Allocate(frameCount);
+	for (int i = 0; i < frameCount; i++)
+	{
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = heap.GetGPUHandle(startIndex);
+		BasePCBHandle.push_back(gpuHandle); //~ one of each iter
+
+		const D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = heap.GetCPUHandle(startIndex);
+		D3D12_CONSTANT_BUFFER_VIEW_DESC view{};
+		view.BufferLocation = PixelConstantBuffer->GetGPUVirtualAddress() + offset;
+		view.SizeInBytes	= resourceSize;
+
+		device->CreateConstantBufferView(&view, cpuHandle);
+		PixelConstantMap.Mapped.push_back(mapped + offset);
+		PixelConstantMap.Views .push_back(view);
+		PixelConstantMap.GPUHandle.push_back(gpuHandle);
+
+		//~ step
+		offset += resourceSize;
+		++startIndex;
+	}
 }

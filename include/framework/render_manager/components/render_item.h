@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "decriptor_heap.h"
+#include "utility/json_loader.h"
 #include "utility/mesh_generator.h"
 
 enum class EPrimitiveMode : std::uint8_t
@@ -101,6 +102,7 @@ struct ConstantData
 	std::uint32_t Size;
 	std::vector<D3D12_CONSTANT_BUFFER_VIEW_DESC> Views;
 	std::vector<BYTE*> Mapped;
+	std::vector<D3D12_GPU_DESCRIPTOR_HANDLE> GPUHandle;
 };
 
 struct MeshGeometry
@@ -131,6 +133,73 @@ struct PerObjectConstantsCPU
 	DirectX::XMFLOAT4X4 World;
 };
 
+enum class ELightType : std::uint8_t
+{
+	Directional,
+	Point,
+	Spotlight
+};
+
+inline std::string ToString(const ELightType type)
+{
+	switch (type)
+	{
+		case ELightType::Directional: return "Directional";
+		case ELightType::Point:       return "Point";
+		case ELightType::Spotlight:   return "Spotlight";
+	}
+	return "Unknown";
+}
+
+struct LightCPU
+{
+	DirectX::XMFLOAT3 Strength;
+	float FalloffStart = 0.0f;  // point/spot
+	DirectX::XMFLOAT3 Direction;
+	float FalloffEnd   = 0.0f;  // dir/spot + range
+	DirectX::XMFLOAT3 Position;
+	float SpotPower    = 0.0f;  // point/spot
+};
+
+struct PassConstantsCPU;
+
+struct LightManager
+{
+	static constexpr std::uint32_t MaxLights = 16;
+
+	std::vector<LightCPU> DirectionalLights;
+	std::vector<LightCPU> PointLights;
+	std::vector<LightCPU> SpotLights;
+
+	// Creation
+	LightCPU& AddDirectional(const DirectX::XMFLOAT3& direction,
+							 const DirectX::XMFLOAT3& strength);
+
+	LightCPU& AddPoint(const DirectX::XMFLOAT3& position,
+					   const DirectX::XMFLOAT3& strength,
+					   float falloffStart,
+					   float falloffEnd);
+
+	LightCPU& AddSpot(const DirectX::XMFLOAT3& position,
+					  const DirectX::XMFLOAT3& direction,
+					  const DirectX::XMFLOAT3& strength,
+					  float falloffStart,
+					  float falloffEnd,
+					  float spotPower);
+
+	// Management
+	void Clear();
+	std::uint32_t TotalLightCount() const;
+
+	// GPU packing
+	void FillPassConstants(PassConstantsCPU& out) const;
+
+	void ImguiView();
+
+	JsonLoader GetJsonData() const;
+	void LoadJsonData(const JsonLoader& data);
+};
+
 struct PassConstantsCPU
 {
 	DirectX::XMFLOAT4X4 View;
@@ -147,6 +216,17 @@ struct PassConstantsCPU
 	float FarZ;
 	float TotalTime;
 	float DeltaTime;
+
+	// lights
+	DirectX::XMFLOAT4 AmbientLight{ 0.10f, 0.10f, 0.10f, 1.0f };
+
+	std::uint32_t NumDirLights   = 1;
+	std::uint32_t NumPointLights = 0;
+	std::uint32_t NumSpotLights  = 0;
+	std::uint32_t cbPassPad2     = 0;
+
+	static constexpr std::uint32_t MaxLights = 16;
+	LightCPU Lights[MaxLights]{};
 };
 
 struct RenderItem
@@ -171,6 +251,35 @@ struct RenderItem
 		framework::DescriptorHeap& heap);
 
 	void ImguiView();
+};
+
+struct Material
+{
+	std::string   Name		       { "NoName" };
+	std::uint32_t SrvHeapIndex     { 0u };
+	std::uint32_t FrameIndex       { 0u };
+	std::uint32_t FrameCount       { 1u };
+
+	struct MaterialConstants
+	{
+		DirectX::XMFLOAT4	DiffuseAlbedo{ 1.f, 1.f, 1.f, 1.f };
+		DirectX::XMFLOAT3	FresnelR0	 { 0.04f, 0.04f, 0.04f };
+		float				Roughness	 { 0.25f };
+		DirectX::XMFLOAT4X4 MatTransform;
+	};
+	MaterialConstants Config{};
+
+	void ImguiView();
+
+	//~ pixel constant buffers
+	Microsoft::WRL::ComPtr<ID3D12Resource>	 PixelConstantBuffer;
+	std::vector<D3D12_GPU_DESCRIPTOR_HANDLE> BasePCBHandle;
+	ConstantData PixelConstantMap{};
+
+	void InitPixelConstantBuffer(
+	const std::uint32_t frameCount,
+	ID3D12Device* device,
+	framework::DescriptorHeap& heap);
 };
 
 #endif //DIRECTX12_OBJECT_H

@@ -1,47 +1,60 @@
 # DirectX 12 Frank Luna: Chapters with Answers
 
-This repo is my **DirectX 12 learning playground** built while following the **Frank Luna DirectX 12 textbook**.
+This repo is my **Scene based dx12** implementation, built while studying the  
+**Frank Luna – *Introduction to 3D Game Programming with DirectX 12*** textbook.
 
-``NOT A REPLICA``
+This is **not a copy of the book** — it’s a hands-on implementation space where
+each chapter becomes a runnable scene, with exercises implemented and extended
+where possible.
+
+`NOT A REPLICA`
 ---
 
 ## Current Output
 
-### Chapter 4
+### Chapter 4: Direct3D Initialization & First Triangle
 ![Chapter 4 Output](outputs/chapter-4.gif)
 
-> Chapter 4 in the book doesn’t include exercise questions, so there are **no answers** for that chapter — only the working output.
+> Chapter 4 has **no exercise questions** in the book, so this chapter focuses
+> purely on getting a clean, working DirectX 12 pipeline and output.
 
 ---
 
-### Chapter 6 with all the programming answers
+### Chapter 6: Drawing in Direct3D (All Exercises Implemented)
 ![Chapter 6 Final Output](outputs/chapter-6/final-output.gif)
 
 **Showcase Video:**  
 [▶ Watch Chapter 6 Showcase](outputs/chapter-6/showcase.mp4)
 
+This chapter includes **all programming exercises**, implemented and extended
+for clarity and experimentation.
+
 ---
 
-### Chapter 7
+### Chapter 7: Textures, Materials & Terrain
 ![Chapter 7 Mountain Solid](outputs/chapter-7/mountain-output-solid.png)
 ![Chapter 7 Mountain Wireframe](outputs/chapter-7/mountain-output-wireframe.png)
+![Chapter 8 Water](outputs/misc/river.gif)
 
 ---
 
-### Chapter 8 — Lights (In Progress)
-![Chapter 8 Water](outputs/misc/river.gif)
+### Chapter 8: Lighting
+![Chapter 8 PointLight](outputs/chapter-8/point-light.gif)
+![Chapter 8 DirectionalLight](outputs/chapter-8/directional-light.gif)
+![Chapter 8 SpotLight](outputs/chapter-8/spot-light.gif)
+
 ---
 
 ## What’s Inside
 
 - **Chapter-based scenes**  
-  Each textbook chapter is treated as a selectable scene/module.
+  Each textbook chapter is implemented as its own selectable scene/module.
 
 - **Exercise answers**  
-  Implementations are provided where the book includes questions.
+  All chapters that include programming exercises have their answers implemented.
 
-- **ImGui controls**
-
+- **ImGui controls**  
+  Runtime tweaking of parameters for learning and experimentation.
 ---
 
 ## Build & Run

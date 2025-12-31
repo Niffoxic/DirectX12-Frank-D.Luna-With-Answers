@@ -273,6 +273,7 @@ void SceneChapter8::FrameBegin(float deltaTime)
 	CreatePipeline		();
 	CreateGeometry		();
 	CreateRenderItems	();
+	CreateMaterials		();
 
 	UpdateConstantBuffer(deltaTime);
 
@@ -336,17 +337,25 @@ void SceneChapter8::ImguiView(const float deltaTime)
 {
 	(void)deltaTime;
 
+	m_lightManager  .ImguiView();
 	m_descriptorHeap.ImguiView();
 
 	constexpr ERenderType kShapes[] =
 	{
-		ERenderType::River
+		ERenderType::River,
+		ERenderType::Mountain
 	};
 
 	m_riverParam.ImguiView();
 
 	for (ERenderType shape : kShapes)
 	{
+		//~ update pixel config
+		if (m_materials.contains(shape))
+		{
+			m_materials[shape].ImguiView();
+		}else THROW_MSG("LOGIC ERROR MATERIAL ISN'T THERE!");
+
 		auto it = m_renderItems.find(shape);
 		if (it == m_renderItems.end() || it->second.empty())
 			continue;
@@ -613,7 +622,7 @@ void SceneChapter8::CreateShaders()
 
 	const std::string vertexPath = "shaders/chapter_7/vertex_shader.hlsl";
 	const auto wVP = std::wstring(vertexPath.begin(), vertexPath.end());
-	const std::string pixelPath  = "shaders/chapter_7/pixel_shader.hlsl";
+	const std::string pixelPath  = "shaders/chapter_8/pixel_shader.hlsl";
 	const auto wPP = std::wstring(pixelPath.begin(), pixelPath.end());
 
 	if (!helpers::IsFile(vertexPath) || !helpers::IsFile(pixelPath))
@@ -657,18 +666,30 @@ void SceneChapter8::CreateRootSignature()
 	range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 	range.RangeType							= D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
 
-	D3D12_ROOT_PARAMETER param[1]{};
+	D3D12_DESCRIPTOR_RANGE psRange{};
+	psRange.NumDescriptors					    = 1u;
+	psRange.BaseShaderRegister				    = 2u;
+	psRange.RegisterSpace						= 0u;
+	psRange.OffsetInDescriptorsFromTableStart   = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+	psRange.RangeType							= D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+
+	D3D12_ROOT_PARAMETER param[2]{};
 	param[0].ParameterType						 = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-	param[0].ShaderVisibility					 = D3D12_SHADER_VISIBILITY_VERTEX;
+	param[0].ShaderVisibility					 = D3D12_SHADER_VISIBILITY_ALL;
 	param[0].DescriptorTable.NumDescriptorRanges = 1u;
 	param[0].DescriptorTable.pDescriptorRanges	 = &range;
 
+	param[1].ParameterType						 = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	param[1].ShaderVisibility					 = D3D12_SHADER_VISIBILITY_PIXEL;
+	param[1].DescriptorTable.NumDescriptorRanges = 1u;
+	param[1].DescriptorTable.pDescriptorRanges	 = &psRange;
+
 	D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc{};
 	rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
-	rootSignatureDesc.NumParameters = 1u;
-	rootSignatureDesc.pParameters = param;
+	rootSignatureDesc.NumParameters		= 2u;
+	rootSignatureDesc.pParameters	    = param;
 	rootSignatureDesc.NumStaticSamplers = 0u;
-	rootSignatureDesc.pStaticSamplers = nullptr;
+	rootSignatureDesc.pStaticSamplers	= nullptr;
 
 	Microsoft::WRL::ComPtr<ID3DBlob> sigBlob;
 	Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
@@ -715,25 +736,46 @@ void SceneChapter8::CreateGeometry()
 	if (m_bGeometryInitialized) return;
 	m_bGeometryInitialized = true;
 
-	GenerateGridConfig cfg{};
-	cfg.Width           = 120.0f;
-	cfg.Depth           = 60.0f;
-	cfg.SubdivisionsX   = 480;
-	cfg.SubdivisionsZ   = 240;
-	cfg.Centered        = true;
-	cfg.GenerateTangents = true;
-	cfg.Color           = DirectX::XMFLOAT3(0.05f, 0.25f, 0.35f);
+	{ // river
+		GenerateGridConfig cfg{};
+		cfg.Width           = 120.0f;
+		cfg.Depth           = 60.0f;
+		cfg.SubdivisionsX   = 480;
+		cfg.SubdivisionsZ   = 240;
+		cfg.Centered        = true;
+		cfg.GenerateTangents = true;
+		cfg.Color           = DirectX::XMFLOAT3(0.05f, 0.25f, 0.35f);
 
-	m_riverBase  = MeshGenerator::GenerateGrid(cfg);
-	m_riverFrame = m_riverBase;
+		m_riverBase  = MeshGenerator::GenerateGrid(cfg);
+		m_riverFrame = m_riverBase;
 
-	m_geometries[ERenderType::River] = MeshGeometry{};
-	m_geometries[ERenderType::River].InitGeometryBuffer(
-		Render.Device.Get(),
-		Render.GfxCmd.Get(),
-		m_riverBase,
-		true
-	);
+		m_geometries[ERenderType::River] = MeshGeometry{};
+		m_geometries[ERenderType::River].InitGeometryBuffer(
+			Render.Device.Get(),
+			Render.GfxCmd.Get(),
+			m_riverBase,
+			true
+		);
+	}
+	// mountain
+	{
+		GenerateMountainConfig cfg{};
+		cfg.Width = 60.f;
+		cfg.Depth = 150.f;
+		cfg.SubdivisionsX = 500;
+		cfg.SubdivisionsZ = 500;
+		cfg.Falloff = 4.7f;
+
+		m_geometries[ERenderType::Mountain] = MeshGeometry{};
+		const MeshData data = MeshGenerator::GenerateMountain(cfg);
+		m_geometries[ERenderType::Mountain].InitGeometryBuffer(
+			Render.Device.Get(),
+			Render.GfxCmd.Get(),
+			data, false);
+
+		if (!m_renderItems[ERenderType::Mountain].empty())
+			m_renderItems[ERenderType::Mountain][0].Mesh = &m_geometries[ERenderType::Mountain];
+	}
 }
 
 void SceneChapter8::CreateRenderItems()
@@ -741,21 +783,60 @@ void SceneChapter8::CreateRenderItems()
 	if (m_bRenderItemInitialized) return;
 	m_bRenderItemInitialized = true;
 
-	RenderItem item{};
-	item.Mesh = &m_geometries[ERenderType::River];
-	item.InitConstantBuffer(
-		Render.BackBufferCount,
-		Render.Device.Get(),
-		m_descriptorHeap);
-	m_renderItems[ERenderType::River].emplace_back(std::move(item));
+	{
+		RenderItem item{};
+		item.Mesh = &m_geometries[ERenderType::River];
+		item.InitConstantBuffer(
+			Render.BackBufferCount,
+			Render.Device.Get(),
+			m_descriptorHeap);
+		m_renderItems[ERenderType::River].emplace_back(std::move(item));
+	}
+
+	{
+		RenderItem item{};
+		item.Mesh = &m_geometries[ERenderType::Mountain];
+		item.InitConstantBuffer(
+			Render.BackBufferCount,
+			Render.Device.Get(),
+			m_descriptorHeap);
+		m_renderItems[ERenderType::Mountain].emplace_back(std::move(item));
+	}
 
 	LoadData();
+}
+
+void SceneChapter8::CreateMaterials()
+{
+	if (m_bMaterialsInitialized) return;
+	m_bMaterialsInitialized = true;
+
+	//~ grass
+	auto& grass = m_materials[ERenderType::Mountain];
+	grass.Name			 = "grass";
+	grass.FrameCount = Render.BackBufferCount;
+
+	grass.InitPixelConstantBuffer(Render.BackBufferCount,
+		Render.Device.Get(),
+		m_descriptorHeap);
+
+	auto& water = m_materials[ERenderType::River];
+	water.Name = "water";
+	water.Config.DiffuseAlbedo = { 0.0f, 0.2f, 0.6f, 1.0f };
+	water.Config.Roughness = 0.f;
+	water.FrameCount = Render.BackBufferCount;
+
+	water.InitPixelConstantBuffer(Render.BackBufferCount,
+		Render.Device.Get(),
+		m_descriptorHeap);
 }
 
 void SceneChapter8::UpdateConstantBuffer(const float deltaTime)
 {
 	m_globalPassConstant.DeltaTime = deltaTime;
 	m_globalPassConstant.TotalTime = m_totalTime;
+
+	m_lightManager.FillPassConstants(m_globalPassConstant);
 
 	for (auto &vec: m_renderItems | std::views::values)
 	{
@@ -779,6 +860,14 @@ void SceneChapter8::UpdateConstantBuffer(const float deltaTime)
 			std::memcpy(dst, &m_globalPassConstant, sizeof(m_globalPassConstant));
 		}
 	}
+
+	//~ update material constant buffer
+	for (auto& [name, mat] : m_materials)
+	{
+		const auto index = mat.FrameIndex;
+		BYTE* dst				= mat.PixelConstantMap.Mapped[index];
+		std::memcpy(dst, &mat.Config, sizeof(mat.Config));
+	}
 }
 
 void SceneChapter8::DrawRenderItems()
@@ -789,7 +878,7 @@ void SceneChapter8::DrawRenderItems()
 	Render.GfxCmd->SetGraphicsRootSignature(m_rootSignature.Get());
 	Render.GfxCmd->SetPipelineState(m_pipeline.GetNative());
 
-	for (auto &items: m_renderItems | std::views::values)
+	for (auto &[type, items]: m_renderItems)
 	{
 		for (auto& item : items)
 		{
@@ -797,8 +886,15 @@ void SceneChapter8::DrawRenderItems()
 
 			if (item.Visible)
 			{
+				//~ constant buffer vertex
 				Render.GfxCmd->SetGraphicsRootDescriptorTable(
 						0u, item.BaseCBHandle[index]);
+
+				//~ constant buffer pixel
+				//~ set material based on type
+				const auto matGpuHandle = m_materials[type].PixelConstantMap.GPUHandle[index];
+				Render.GfxCmd->SetGraphicsRootDescriptorTable(1u, matGpuHandle);
+
 				const auto prim = GetTopologyType(item.PrimitiveMode);
 				Render.GfxCmd->IASetPrimitiveTopology(prim);
 				Render.GfxCmd->IASetIndexBuffer(&item.Mesh->IndexViews);
@@ -811,9 +907,9 @@ void SceneChapter8::DrawRenderItems()
 						item.Mesh->BaseVertexLocation,
 						0u
 					);
+				m_materials[type].FrameIndex = (index + 1u) % Render.BackBufferCount;
+				item.FrameIndex				 = (index + 1u) % Render.BackBufferCount;
 			}
-
-			item.FrameIndex = (index + 1u) % Render.BackBufferCount;
 		}
 	}
 }
@@ -980,6 +1076,12 @@ void SceneChapter8::UpdateRiver(const float deltaTime)
 		}
 
 		MeshGenerator::ComputeNormals(geo->Data);
+		for (auto& v : geo->Data.vertices)
+		{
+			v.Normal.x = -v.Normal.x;
+			v.Normal.y = -v.Normal.y;
+			v.Normal.z = -v.Normal.z;
+		}
 
 		const uint32_t vbSize = uint32_t(sizeof(MeshVertex) * geo->Data.vertices.size());
 		std::memcpy(geo->Mapped, geo->Data.vertices.data(), vbSize);
