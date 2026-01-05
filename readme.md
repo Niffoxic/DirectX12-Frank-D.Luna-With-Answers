@@ -45,6 +45,12 @@ for clarity and experimentation.
 
 ---
 
+### Chapter 9: Texture
+![Chapter 9 Main](outputs/chapter-9/output-1.gif)
+
+> ignore the black line on water m using free assets
+---
+
 ## What’s Inside
 
 - **Chapter-based scenes**  

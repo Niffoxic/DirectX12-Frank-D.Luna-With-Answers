@@ -229,6 +229,49 @@ struct PassConstantsCPU
 	LightCPU Lights[MaxLights]{};
 };
 
+enum class ETextureType: uint16_t
+{
+	Albedo = 0,
+	Normal = 1,
+	ARM = 2
+};
+
+inline std::string ToString(const ETextureType type)
+{
+	switch (type)
+	{
+		case ETextureType::Albedo: return "Albedo";
+		case ETextureType::Normal: return "Normal";
+		case ETextureType::ARM: return "ARM";
+	}
+	return "Unknown";
+}
+
+struct Texture
+{
+	std::string  Name;
+	std::unordered_map<ETextureType, std::wstring> TexturePaths;
+	bool		 bCubeMap;
+
+	struct ResourcesPack
+	{
+		Microsoft::WRL::ComPtr<ID3D12Resource>	Resource;
+		Microsoft::WRL::ComPtr<ID3D12Resource>	UploadHeap;
+		D3D12_SHADER_RESOURCE_VIEW_DESC			View;
+	};
+	std::unordered_map<ETextureType, ResourcesPack> Resources;
+
+	D3D12_GPU_DESCRIPTOR_HANDLE baseGpuHandle{};
+	D3D12_CPU_DESCRIPTOR_HANDLE baseCpuHandle{};
+	std::uint32_t			    heapIndex{};
+
+	void Init(ID3D12Device*				 device,
+			  ID3D12CommandQueue*		 commandQueue,
+			  framework::DescriptorHeap& heap);
+
+	[[nodiscard]] bool IsValid() const noexcept;
+};
+
 struct RenderItem
 {
 	std::string Name{ "NoName" };
@@ -245,6 +288,12 @@ struct RenderItem
 	ConstantData PerObject	 {};
 	ConstantData PassConstant{};
 
+	std::unordered_map<ETextureType, Texture> Textures;
+
+	void InitTextures(ID3D12Device*				 device,
+					  ID3D12CommandQueue*		 commandQueue,
+					  framework::DescriptorHeap& heap);
+
 	void InitConstantBuffer(
 		const std::uint32_t frameCount,
 		ID3D12Device* device,
@@ -255,31 +304,69 @@ struct RenderItem
 
 struct Material
 {
-	std::string   Name		       { "NoName" };
-	std::uint32_t SrvHeapIndex     { 0u };
-	std::uint32_t FrameIndex       { 0u };
-	std::uint32_t FrameCount       { 1u };
+	std::string   Name{ "NoName" };
+	std::uint32_t SrvHeapIndex{ 0u };
+	std::uint32_t FrameIndex{ 0u };
+	std::uint32_t FrameCount{ 1u };
+
+	bool m_UVDirty{ true };
+	DirectX::XMFLOAT2 m_UVTiling{ 1.f, 1.f };
+	DirectX::XMFLOAT2 m_UVOffset{ 0.f, 0.f };
+	float m_UVRotationRadians{ 0.f };
+
+	DirectX::XMFLOAT2 m_UVScrollSpeed{ 0.f, 0.f };
+	float m_UVRotationSpeedRad{ 0.f };
 
 	struct MaterialConstants
 	{
-		DirectX::XMFLOAT4	DiffuseAlbedo{ 1.f, 1.f, 1.f, 1.f };
-		DirectX::XMFLOAT3	FresnelR0	 { 0.04f, 0.04f, 0.04f };
-		float				Roughness	 { 0.25f };
-		DirectX::XMFLOAT4X4 MatTransform;
+		DirectX::XMFLOAT4   DiffuseAlbedo{ 1.f, 1.f, 1.f, 1.f };
+		DirectX::XMFLOAT3   FresnelR0{ 0.04f, 0.04f, 0.04f };
+		float               Roughness{ 0.25f };
+
+		DirectX::XMFLOAT4X4 MatTransform{
+			1.f, 0.f, 0.f, 0.f,
+			0.f, 1.f, 0.f, 0.f,
+			0.f, 0.f, 1.f, 0.f,
+			0.f, 0.f, 0.f, 1.f
+		};
+
+		float IsAlbedoAttached{ 0.f };
+		float IsNormalAttached{ 0.f };
+		float IsARMAttached{ 0.f };
+		float IsDisplacementAttached{ 0.f };
+
+		float UseLinearWrap	{ 1.f };
+		float UseLinearClamp{ 0.f };
+		float UsePointClamp	{ 0.f };
+		float UseAnisoWrap	{ 0.f };
+		float UseEnvMap		{ 0.f };
+		DirectX::XMFLOAT3 padding{ 0.f, 0.f, 0.f };
 	};
+
 	MaterialConstants Config{};
 
 	void ImguiView();
 
-	//~ pixel constant buffers
-	Microsoft::WRL::ComPtr<ID3D12Resource>	 PixelConstantBuffer;
-	std::vector<D3D12_GPU_DESCRIPTOR_HANDLE> BasePCBHandle;
-	ConstantData PixelConstantMap{};
+	void SetUVTiling(float x, float y);
+	void SetUVOffset(float x, float y);
+	void SetUVRotationRadians(float rads);
 
-	void InitPixelConstantBuffer(
-	const std::uint32_t frameCount,
-	ID3D12Device* device,
-	framework::DescriptorHeap& heap);
+	void SetUVScrollSpeed(float uPerSec, float vPerSec);
+	void SetUVRotationSpeedRadians(float radPerSec);
+
+	void TickUV(float deltaTime);
+	void RebuildUVTransformIfDirty();
+
+	Microsoft::WRL::ComPtr<ID3D12Resource>     PixelConstantBuffer;
+	std::vector<D3D12_GPU_DESCRIPTOR_HANDLE>  BasePCBHandle;
+	ConstantData                               PixelConstantMap{};
+
+	void InitPixelConstantBuffer(std::uint32_t frameCount,
+		ID3D12Device* device,
+		framework::DescriptorHeap& heap);
 };
+
+static_assert(sizeof(Material::MaterialConstants) % 16 == 0);
+
 
 #endif //DIRECTX12_OBJECT_H

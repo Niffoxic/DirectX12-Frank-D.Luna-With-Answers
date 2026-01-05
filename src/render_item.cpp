@@ -36,6 +36,12 @@
 #include "framework/exception/dx_exception.h"
 #include "imgui.h"
 
+#include <DDSTextureLoader.h>
+#include <ranges>
+#include <ResourceUploadBatch.h>
+
+#include "utility/helpers.h"
+
 static inline void Normalize3(DirectX::XMFLOAT3& v)
 {
 	const float x = v.x, y = v.y, z = v.z;
@@ -496,6 +502,138 @@ void LightManager::LoadJsonData(const JsonLoader& data)
 	ReadList("Spot",        SpotLights);
 }
 
+void Texture::Init(	ID3D12Device *device,
+					ID3D12CommandQueue *queue,
+					framework::DescriptorHeap &heap)
+{
+	if (IsValid()) return;
+
+	auto validPath = [&](const ETextureType t) -> const std::wstring*
+	{
+		const auto it = TexturePaths.find(t);
+		if (it == TexturePaths.end()) return nullptr;
+		if (!helpers::IsFile(it->second)) return nullptr;
+		return &it->second;
+	};
+
+	std::vector<ETextureType> toLoad;
+	toLoad.reserve(TexturePaths.size());
+
+	for (auto& [type, path] : TexturePaths)
+	{
+		if (helpers::IsFile(path))
+			toLoad.push_back(type);
+	}
+
+	if (toLoad.empty())
+	{
+		THROW_MSG("Texture::Init: no valid texture files in TexturePaths.");
+	}
+
+	std::ranges::sort(toLoad,
+	  [](ETextureType a, ETextureType b)
+	  {
+	      return static_cast<std::uint16_t>(a) < static_cast<std::uint16_t>(b);
+	  });
+
+	const std::uint32_t count = static_cast<std::uint32_t>(toLoad.size());
+
+	heapIndex = heap.Allocate(count);
+	baseCpuHandle = heap.GetCPUHandle(heapIndex);
+	baseGpuHandle = heap.GetGPUHandle(heapIndex);
+
+	DirectX::ResourceUploadBatch upload(device);
+	upload.Begin();
+
+	DirectX::DDS_ALPHA_MODE alphaMode = DirectX::DDS_ALPHA_MODE_UNKNOWN;
+
+	for (std::uint32_t i = 0; i < count; ++i)
+	{
+		const auto type = toLoad[i];
+		const auto* path = validPath(type);
+		if (!path)
+			continue;
+
+		auto& pack = Resources[type];
+		pack.View = {};
+
+		bool isCube = false;
+
+		const HRESULT hr = DirectX::CreateDDSTextureFromFile(
+			device,
+			upload,
+			path->c_str(),
+			pack.Resource.ReleaseAndGetAddressOf(),
+			true,
+			0,
+			&alphaMode,
+			&isCube
+		);
+
+		THROW_DX_IF_FAILS(hr);
+
+		if (isCube)
+			bCubeMap = true;
+	}
+
+	upload.End(queue).wait();
+
+	for (std::uint32_t i = 0; i < count; ++i)
+	{
+		const auto type = toLoad[i];
+
+		auto it = Resources.find(type);
+		if (it == Resources.end() || !it->second.Resource)
+			continue;
+
+		auto& pack = it->second;
+
+		const auto desc = pack.Resource->GetDesc();
+
+		pack.View = {};
+		pack.View.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		pack.View.Format = desc.Format;
+
+		if (bCubeMap)
+		{
+			pack.View.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+			pack.View.TextureCube.MostDetailedMip = 0;
+			pack.View.TextureCube.MipLevels = desc.MipLevels;
+			pack.View.TextureCube.ResourceMinLODClamp = 0.0f;
+		}
+		else
+		{
+			pack.View.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+			pack.View.Texture2D.MostDetailedMip = 0;
+			pack.View.Texture2D.MipLevels = desc.MipLevels;
+			pack.View.Texture2D.PlaneSlice = 0;
+			pack.View.Texture2D.ResourceMinLODClamp = 0.0f;
+		}
+
+		const auto cpu = heap.GetCPUHandle(heapIndex + i);
+		device->CreateShaderResourceView(pack.Resource.Get(), &pack.View, cpu);
+	}
+}
+
+bool Texture::IsValid() const noexcept
+{
+	for (const auto &pack: Resources | std::views::values)
+	{
+		if (pack.Resource) return true;
+	}
+	return false;
+}
+
+void RenderItem::InitTextures(	ID3D12Device *device,
+								ID3D12CommandQueue *commandQueue,
+								framework::DescriptorHeap &heap)
+{
+	for (auto &tex: Textures | std::views::values)
+	{
+		tex.Init(device, commandQueue, heap);
+	}
+}
+
 void RenderItem::InitConstantBuffer(
 	const std::uint32_t frameCount,
 	ID3D12Device *device,
@@ -655,7 +793,6 @@ void Material::ImguiView()
 	{
 		ImGui::Indent();
 
-		// Identity / indices
 		{
 			char nameBuffer[128]{};
 			if (!Name.empty())
@@ -664,54 +801,108 @@ void Material::ImguiView()
 			if (ImGui::InputText("Name", nameBuffer, sizeof(nameBuffer)))
 				Name = nameBuffer;
 
-			// Indices / state
 			ImGui::InputScalar("SRV Heap Index", ImGuiDataType_U32, &SrvHeapIndex);
 			ImGui::InputScalar("Num Frames", ImGuiDataType_U32, &FrameCount);
 		}
 
 		ImGui::Separator();
 
-		// Constant data
 		{
 			ImGui::TextUnformatted("Constant Data");
 
 			ImGui::ColorEdit4("Diffuse Albedo", &Config.DiffuseAlbedo.x);
-
 			ImGui::ColorEdit3("Fresnel R0", &Config.FresnelR0.x);
 			ImGui::SliderFloat("Roughness", &Config.Roughness, 0.0f, 1.0f);
 
-			if (ImGui::TreeNodeEx("Mat Transform", ImGuiTreeNodeFlags_DefaultOpen))
+			ImGui::Separator();
+
 			{
-				float* m = &Config.MatTransform._11;
+				ImGui::TextUnformatted("Texture Attachments");
 
-				// Display/edit rows (row-major in memory for XMFLOAT4X4)
-				ImGui::DragFloat4("Row 0", m + 0, 0.01f);
-				ImGui::DragFloat4("Row 1", m + 4, 0.01f);
-				ImGui::DragFloat4("Row 2", m + 8, 0.01f);
-				ImGui::DragFloat4("Row 3", m + 12, 0.01f);
+				bool hasAlbedo = (Config.IsAlbedoAttached >= 0.5f);
+				bool hasNormal = (Config.IsNormalAttached >= 0.5f);
+				bool hasARM    = (Config.IsARMAttached    >= 0.5f);
 
-				// Quick buttons
-				if (ImGui::Button("Identity"))
+				bool changed = false;
+				changed |= ImGui::Checkbox("Albedo (Base Color)", &hasAlbedo);
+				changed |= ImGui::Checkbox("Normal", &hasNormal);
+				changed |= ImGui::Checkbox("ARM (AO/Rough/Metal)", &hasARM);
+
+				if (changed)
 				{
-					Config.MatTransform = DirectX::XMFLOAT4X4(
-						1.f, 0.f, 0.f, 0.f,
-						0.f, 1.f, 0.f, 0.f,
-						0.f, 0.f, 1.f, 0.f,
-						0.f, 0.f, 0.f, 1.f
-					);
+					Config.IsAlbedoAttached = hasAlbedo ? 1.0f : 0.0f;
+					Config.IsNormalAttached = hasNormal ? 1.0f : 0.0f;
+					Config.IsARMAttached    = hasARM    ? 1.0f : 0.0f;
+				}
+
+				if (ImGui::Button("All On"))
+				{
+					Config.IsAlbedoAttached = 1.0f;
+					Config.IsNormalAttached = 1.0f;
+					Config.IsARMAttached    = 1.0f;
 				}
 				ImGui::SameLine();
-				if (ImGui::Button("Zero"))
+				if (ImGui::Button("All Off"))
 				{
-					Config.MatTransform = DirectX::XMFLOAT4X4(
-						0.f, 0.f, 0.f, 0.f,
-						0.f, 0.f, 0.f, 0.f,
-						0.f, 0.f, 0.f, 0.f,
-						0.f, 0.f, 0.f, 0.f
-					);
+					Config.IsAlbedoAttached = 0.0f;
+					Config.IsNormalAttached = 0.0f;
+					Config.IsARMAttached    = 0.0f;
+				}
+			}
+
+			ImGui::Separator();
+
+			{
+				ImGui::TextUnformatted("Sampler Selection");
+
+				int mode = 0;
+				if (Config.UseLinearClamp >= 0.5f) mode = 1;
+				else if (Config.UsePointClamp >= 0.5f) mode = 2;
+				else if (Config.UseAnisoWrap >= 0.5f) mode = 3;
+				else if (Config.UseEnvMap >= 0.5f) mode = 4;
+
+				if (ImGui::RadioButton("Linear Wrap", mode == 0)) mode = 0;
+				if (ImGui::RadioButton("Linear Clamp", mode == 1)) mode = 1;
+				if (ImGui::RadioButton("Point Clamp", mode == 2)) mode = 2;
+				if (ImGui::RadioButton("Aniso Wrap", mode == 3)) mode = 3;
+				if (ImGui::RadioButton("Env Map", mode == 4)) mode = 4;
+
+				Config.UseLinearWrap  = (mode == 0) ? 1.0f : 0.0f;
+				Config.UseLinearClamp = (mode == 1) ? 1.0f : 0.0f;
+				Config.UsePointClamp  = (mode == 2) ? 1.0f : 0.0f;
+				Config.UseAnisoWrap   = (mode == 3) ? 1.0f : 0.0f;
+				Config.UseEnvMap      = (mode == 4) ? 1.0f : 0.0f;
+			}
+
+			ImGui::Separator();
+
+			{
+				ImGui::TextUnformatted("UV Transform");
+
+				bool uvChanged = false;
+
+				uvChanged |= ImGui::DragFloat2("Tiling", &m_UVTiling.x, 0.01f, 0.0f, 100.0f);
+				uvChanged |= ImGui::DragFloat2("Offset", &m_UVOffset.x, 0.001f);
+				uvChanged |= ImGui::DragFloat("Rotation (rad)", &m_UVRotationRadians,
+					0.001f);
+
+				uvChanged |= ImGui::DragFloat2("Scroll Speed (uv/s)",
+					&m_UVScrollSpeed.x, 0.001f);
+				uvChanged |= ImGui::DragFloat("Rotate Speed (rad/s)",
+					&m_UVRotationSpeedRad, 0.001f);
+
+				if (ImGui::Button("Reset UV"))
+				{
+					m_UVTiling = { 1.f, 1.f };
+					m_UVOffset = { 0.f, 0.f };
+					m_UVRotationRadians = 0.f;
+					m_UVScrollSpeed = { 0.f, 0.f };
+					m_UVRotationSpeedRad = 0.f;
+					uvChanged = true;
 				}
 
-				ImGui::TreePop();
+				if (uvChanged)
+					m_UVDirty = true;
 			}
 		}
 
@@ -719,6 +910,87 @@ void Material::ImguiView()
 	}
 
 	ImGui::PopID();
+}
+
+void Material::SetUVTiling(float x, float y)
+{
+	m_UVTiling = { x, y };
+	m_UVDirty = true;
+}
+
+void Material::SetUVOffset(float x, float y)
+{
+	m_UVOffset = { x, y };
+	m_UVDirty = true;
+}
+
+void Material::SetUVRotationRadians(float rads)
+{
+	m_UVRotationRadians = rads;
+	m_UVDirty = true;
+}
+
+void Material::SetUVScrollSpeed(float uPerSec, float vPerSec)
+{
+	m_UVScrollSpeed = { uPerSec, vPerSec };
+}
+
+void Material::SetUVRotationSpeedRadians(float radPerSec)
+{
+	m_UVRotationSpeedRad = radPerSec;
+}
+
+void Material::TickUV(float deltaTime)
+{
+	if (deltaTime <= 0.0f) return;
+	bool changed = false;
+
+	if (m_UVScrollSpeed.x != 0.0f || m_UVScrollSpeed.y != 0.0f)
+	{
+		m_UVOffset.x += m_UVScrollSpeed.x * deltaTime;
+		m_UVOffset.y += m_UVScrollSpeed.y * deltaTime;
+
+		m_UVOffset.x = m_UVOffset.x - std::floor(m_UVOffset.x);
+		m_UVOffset.y = m_UVOffset.y - std::floor(m_UVOffset.y);
+
+		changed = true;
+	}
+
+	if (m_UVRotationSpeedRad != 0.0f)
+	{
+		m_UVRotationRadians += m_UVRotationSpeedRad * deltaTime;
+
+		constexpr float twoPi = 6.283185307179586f;
+		if (m_UVRotationRadians > twoPi || m_UVRotationRadians < -twoPi)
+			m_UVRotationRadians = std::fmod(m_UVRotationRadians, twoPi);
+
+		changed = true;
+	}
+
+	if (changed) m_UVDirty = true;
+}
+
+void Material::RebuildUVTransformIfDirty()
+{
+	if (!m_UVDirty) return;
+
+	const float sx = m_UVTiling.x;
+	const float sy = m_UVTiling.y;
+	const float tx = m_UVOffset.x;
+	const float ty = m_UVOffset.y;
+
+	const float r = m_UVRotationRadians;
+	const float c = std::cos(r);
+	const float s = std::sin(r);
+
+	Config.MatTransform = DirectX::XMFLOAT4X4(
+		sx * c,  sx * -s, 0.f, 0.f,
+		sy * s,  sy *  c, 0.f, 0.f,
+		0.f,     0.f,     1.f, 0.f,
+		tx,      ty,      0.f, 1.f
+	);
+
+	m_UVDirty = false;
 }
 
 void Material::InitPixelConstantBuffer(

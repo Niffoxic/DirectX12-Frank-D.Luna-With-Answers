@@ -47,102 +47,6 @@
 #include "imgui.h"
 #include "utility/json_loader.h"
 
-static DirectX::XMFLOAT3 Lerp3(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b, float t)
-{
-	t = std::clamp(t, 0.0f, 1.0f);
-	return {
-		a.x + (b.x - a.x) * t,
-		a.y + (b.y - a.y) * t,
-		a.z + (b.z - a.z) * t
-	};
-}
-
-static DirectX::XMFLOAT3 Mul3(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b)
-{
-	return { a.x * b.x, a.y * b.y, a.z * b.z };
-}
-
-static DirectX::XMFLOAT3 Add3(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b)
-{
-	return { a.x + b.x, a.y + b.y, a.z + b.z };
-}
-
-static DirectX::XMFLOAT3 Clamp01(const DirectX::XMFLOAT3& c)
-{
-	return {
-		std::clamp(c.x, 0.0f, 1.0f),
-		std::clamp(c.y, 0.0f, 1.0f),
-		std::clamp(c.z, 0.0f, 1.0f)
-	};
-}
-
-void RiverUpdateParam::ImguiView()
-{
-	if (!ImGui::CollapsingHeader("River Parameters", ImGuiTreeNodeFlags_DefaultOpen))
-		return;
-
-	// Wave Shape
-	if (ImGui::CollapsingHeader("Waves", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::SliderFloat("Amp 1", &amp1, 0.0f, 0.50f);
-		ImGui::SliderFloat("Amp 2", &amp2, 0.0f, 0.50f);
-
-		ImGui::SliderFloat("Freq 1", &freq1, 0.0f, 10.0f);
-		ImGui::SliderFloat("Freq 2", &freq2, 0.0f, 10.0f);
-
-		ImGui::SliderFloat("WaveLen 1", &waveLen1, 0.0f, 5.0f);
-		ImGui::SliderFloat("WaveLen 2", &waveLen2, 0.0f, 5.0f);
-
-		ImGui::SliderFloat("Flow Speed", &flowSpeed, 0.0f, 10.0f);
-	}
-
-	// Small Waves / Ripples
-	if (ImGui::CollapsingHeader("Ripples", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::SliderInt  ("Octaves", &octaves, 1, 8);
-		ImGui::SliderFloat("Base Amp", &octaveBaseAmp, 0.0f, 0.10f);
-		ImGui::SliderFloat("Base Freq", &octaveBaseFreq, 0.0f, 5.0f);
-		ImGui::SliderFloat("Base WaveLen", &octaveBaseWaveLen, 0.0f, 5.0f);
-
-		ImGui::SliderFloat("Edge Noise", &edgeNoiseStrength, 0.0f, 1.5f);
-	}
-
-	if (ImGui::CollapsingHeader("Height", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::SliderFloat("Height Scale", &heightScale, 0.0f, 10.0f);
-		ImGui::SliderFloat("Height Bias", &heightBias, -1.0f, 1.0f);
-		ImGui::SliderFloat("Max Height", &maxHeight, 0.0f, 2.0f);
-		ImGui::SliderFloat("Foam Threshold", &foamHeightThreshold, -1.0f, 1.0f);
-	}
-
-	// River Shape
-	if (ImGui::CollapsingHeader("River Shape", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::SliderFloat("Half Width", &halfWidth, 0.0f, 50.0f);
-		ImGui::DragFloatRange2("Z Range", &minZ, &maxZ, 0.05f);
-	}
-
-	// Color Gradient
-	if (ImGui::CollapsingHeader("Color Gradient", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::ColorEdit3("Left",      &leftColor.x);
-		ImGui::ColorEdit3("Right",     &rightColor.x);
-		ImGui::ColorEdit3("Down Left", &downLeftColor.x);
-		ImGui::ColorEdit3("Down Right",&downRightColor.x);
-	}
-
-	// Water Tinting
-	if (ImGui::CollapsingHeader("Water Tint", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::ColorEdit3("Shallow", &shallowColor.x);
-		ImGui::ColorEdit3("Deep",    &deepColor.x);
-		ImGui::ColorEdit3("Foam",    &foamColor.x);
-
-		ImGui::SliderFloat("Foam Strength", &foamStrength, 0.0f, 4.0f);
-		ImGui::SliderFloat("Shimmer Strength", &shimmerStrength, 0.0f, 1.0f);
-	}
-}
-
 SceneChapter8::SceneChapter8(framework::DxRenderManager &renderer)
 	: IScene(renderer)
 {
@@ -604,7 +508,7 @@ void SceneChapter8::CreateAllocators()
 	if (m_bAllocatorsInitialized) return;
 	m_bAllocatorsInitialized = true;
 
-	for (int i = 0; i < Render.BackBufferCount; i++)
+	for (int i = 0; i < framework::DxRenderManager::BackBufferCount; i++)
 	{
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc{ nullptr };
 		THROW_DX_IF_FAILS(Render.Device->CreateCommandAllocator(
@@ -787,7 +691,7 @@ void SceneChapter8::CreateRenderItems()
 		RenderItem item{};
 		item.Mesh = &m_geometries[ERenderType::River];
 		item.InitConstantBuffer(
-			Render.BackBufferCount,
+			framework::DxRenderManager::BackBufferCount,
 			Render.Device.Get(),
 			m_descriptorHeap);
 		m_renderItems[ERenderType::River].emplace_back(std::move(item));
@@ -797,7 +701,7 @@ void SceneChapter8::CreateRenderItems()
 		RenderItem item{};
 		item.Mesh = &m_geometries[ERenderType::Mountain];
 		item.InitConstantBuffer(
-			Render.BackBufferCount,
+			framework::DxRenderManager::BackBufferCount,
 			Render.Device.Get(),
 			m_descriptorHeap);
 		m_renderItems[ERenderType::Mountain].emplace_back(std::move(item));
@@ -814,9 +718,9 @@ void SceneChapter8::CreateMaterials()
 	//~ grass
 	auto& grass = m_materials[ERenderType::Mountain];
 	grass.Name			 = "grass";
-	grass.FrameCount = Render.BackBufferCount;
+	grass.FrameCount = framework::DxRenderManager::BackBufferCount;
 
-	grass.InitPixelConstantBuffer(Render.BackBufferCount,
+	grass.InitPixelConstantBuffer(framework::DxRenderManager::BackBufferCount,
 		Render.Device.Get(),
 		m_descriptorHeap);
 
@@ -824,9 +728,9 @@ void SceneChapter8::CreateMaterials()
 	water.Name = "water";
 	water.Config.DiffuseAlbedo = { 0.0f, 0.2f, 0.6f, 1.0f };
 	water.Config.Roughness = 0.f;
-	water.FrameCount = Render.BackBufferCount;
+	water.FrameCount = framework::DxRenderManager::BackBufferCount;
 
-	water.InitPixelConstantBuffer(Render.BackBufferCount,
+	water.InitPixelConstantBuffer(framework::DxRenderManager::BackBufferCount,
 		Render.Device.Get(),
 		m_descriptorHeap);
 }
@@ -907,8 +811,8 @@ void SceneChapter8::DrawRenderItems()
 						item.Mesh->BaseVertexLocation,
 						0u
 					);
-				m_materials[type].FrameIndex = (index + 1u) % Render.BackBufferCount;
-				item.FrameIndex				 = (index + 1u) % Render.BackBufferCount;
+				m_materials[type].FrameIndex = (index + 1u) % framework::DxRenderManager::BackBufferCount;
+				item.FrameIndex				 = (index + 1u) % framework::DxRenderManager::BackBufferCount;
 			}
 		}
 	}
@@ -1030,21 +934,21 @@ void SceneChapter8::UpdateRiver(const float deltaTime)
 					? std::clamp((z - p.minZ) / zDen, 0.0f, 1.0f)
 					: 0.5f;
 
-				const auto top  = Lerp3(p.leftColor,     p.rightColor,     x01);
-				const auto bot  = Lerp3(p.downLeftColor, p.downRightColor, x01);
-				const auto quad = Lerp3(bot, top, z01);
+				const auto top  = Lerp(p.leftColor,     p.rightColor,     x01);
+				const auto bot  = Lerp(p.downLeftColor, p.downRightColor, x01);
+				const auto quad = Lerp(bot, top, z01);
 
 				const float denom = (p.maxHeight > 0.0001f) ? p.maxHeight : 0.0001f;
 				float h01 = height / denom;
 				h01 = std::clamp(h01 * 0.5f + 0.5f, 0.0f, 1.0f);
 
-				const auto depthTint = Lerp3(p.deepColor, p.shallowColor, h01);
+				const auto depthTint = Lerp(p.deepColor, p.shallowColor, h01);
 
 				float crest = (height - p.foamHeightThreshold) / (p.maxHeight - p.foamHeightThreshold + 0.0001f);
 				crest = std::clamp(crest, 0.0f, 1.0f);
 				float foam = std::clamp((crest * crest) * p.foamStrength, 0.0f, 1.0f);
 
-				const auto foamed = Lerp3(depthTint, p.foamColor, foam);
+				const auto foamed = Lerp(depthTint, p.foamColor, foam);
 
 				const float shimmer = p.shimmerStrength * std::sinf((z * 0.8f) + t * p.flowSpeed) * mask;
 				const DirectX::XMFLOAT3 shimmer3{ shimmer, shimmer, shimmer };
@@ -1083,7 +987,7 @@ void SceneChapter8::UpdateRiver(const float deltaTime)
 			v.Normal.z = -v.Normal.z;
 		}
 
-		const uint32_t vbSize = uint32_t(sizeof(MeshVertex) * geo->Data.vertices.size());
+		const auto vbSize = static_cast<uint32_t>(sizeof(MeshVertex) * geo->Data.vertices.size());
 		std::memcpy(geo->Mapped, geo->Data.vertices.data(), vbSize);
 
 		auto* cmdList = Render.GfxCmd.Get();

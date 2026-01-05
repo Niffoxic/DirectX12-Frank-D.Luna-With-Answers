@@ -54,6 +54,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(assimp)
 
+# DirectX Tool Kit
+FetchContent_Declare(
+        DirectXTK12
+        GIT_REPOSITORY https://github.com/microsoft/DirectXTK12.git
+        GIT_TAG        oct2025
+)
+FetchContent_MakeAvailable(DirectXTK12)
+
+
 # Application
 add_executable(application WIN32
         include/utility/logger.h
@@ -109,6 +118,10 @@ add_executable(application WIN32
         src/scene_testAnim.cpp
         include/framework/animation/anim.h
         src/anim.cpp
+        include/application/scene/scene_chapter_9.h
+        src/scene_chapter_9.cpp
+        include/application/scene/common_scene_data.h
+        src/common_scene_data.cpp
 )
 
 target_compile_definitions(application PRIVATE
@@ -125,12 +138,15 @@ target_include_directories(application PRIVATE
 target_link_libraries(application PRIVATE
         imgui::imgui
         assimp::assimp
+        DirectXTK12
         user32
         dxgi
         d3d12
         dxguid
         D3DCompiler
 )
+
+set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 
 # Runtime copies
 
@@ -151,7 +167,8 @@ add_custom_command(TARGET application POST_BUILD
 if (WIN32)
     add_custom_command(TARGET application POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:assimp::assimp>
+            $<TARGET_RUNTIME_DLLS:application>
             $<TARGET_FILE_DIR:application>
+            COMMAND_EXPAND_LISTS
     )
 endif()

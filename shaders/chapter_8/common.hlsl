@@ -63,6 +63,18 @@ struct MaterialConstants
     float3   FresnelR0;
     float    Roughness;     // 0..1
     float4x4 MatTransform;
+
+    float IsAlbedoAttached;
+    float IsNormalAttached; // 0 means no 1 means yes
+    float IsARMAttached;
+    float IsDisplacementAttached;
+
+    float UseLinearWrap;
+    float UseLinearClamp;
+    float UsePointClamp;
+    float UseAnisoWrap;
+    float UseEnvMap;
+    float3 padding;
 };
 
 cbuffer cbMaterial : register(b2)

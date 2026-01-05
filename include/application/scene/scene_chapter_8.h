@@ -40,70 +40,13 @@
 #include "framework/render_manager/components/decriptor_heap.h"
 #include "framework/render_manager/components/pipeline.h"
 #include "framework/render_manager/components/render_item.h"
-
+#include "common_scene_data.h"
 #include <cstdint>
-
-enum class ERenderType: std::uint32_t
-{
-	River,
-	Mountain,
-};
-
-inline std::string ToString(const ERenderType &type)
-{
-	switch (type)
-	{
-		case ERenderType::River: return "River";
-		case ERenderType::Mountain: return "Mountain";
-		default: return "Unknown";
-	}
-	return "Unknown";
-}
-
-struct RiverUpdateParam
-{
-	float amp1 = 0.06f;
-	float amp2 = 0.03f;
-	float freq1 = 1.40f;
-	float freq2 = 2.80f;
-	float waveLen1 = 0.35f;
-	float waveLen2 = 0.85f;
-	float flowSpeed = 0.75f;
-
-	float halfWidth = 2.0f;
-	float minZ = -10.0f;
-	float maxZ =  10.0f;
-
-	DirectX::XMFLOAT3 leftColor      { 0.02f, 0.12f, 0.25f };
-	DirectX::XMFLOAT3 rightColor     { 0.05f, 0.30f, 0.50f };
-	DirectX::XMFLOAT3 downLeftColor  { 0.02f, 0.08f, 0.18f };
-	DirectX::XMFLOAT3 downRightColor { 0.03f, 0.10f, 0.22f };
-
-	DirectX::XMFLOAT3 shallowColor { 0.05f, 0.35f, 0.55f };
-	DirectX::XMFLOAT3 deepColor    { 0.02f, 0.10f, 0.20f };
-	DirectX::XMFLOAT3 foamColor    { 0.70f, 0.88f, 0.96f };
-
-	float foamStrength    = 1.25f;
-	float shimmerStrength = 0.10f;
-
-	float edgeNoiseStrength = 0.75f;
-	float octaveBaseAmp     = 0.020f;
-	float octaveBaseFreq    = 1.50f;
-	float octaveBaseWaveLen = 0.60f;
-	int   octaves           = 5;
-
-	float heightScale = 1.0f;
-	float heightBias  = 0.0f;
-	float maxHeight   = 0.25f;
-	float foamHeightThreshold = 0.10f;
-
-	void ImguiView();
-};
 
 class SceneChapter8 final: public IScene
 {
 public:
-	SceneChapter8(framework::DxRenderManager& renderer);
+	explicit SceneChapter8(framework::DxRenderManager& renderer);
 	~SceneChapter8() override;
 
 	bool Initialize() override;

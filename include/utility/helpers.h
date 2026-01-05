@@ -93,6 +93,9 @@ namespace helpers
      bool IsFile      (_In_ const std::string& path);
 
     _NODISCARD _Check_return_
+    bool IsFile      (_In_ const std::wstring& path);
+
+    _NODISCARD _Check_return_
      bool CopyFiles(_In_ const std::string& source,
                            _In_ const std::string& destination,
                            _In_ bool               overwrite = true);

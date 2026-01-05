@@ -168,9 +168,14 @@ bool helpers::IsDirectory(const std::string& path)
 _Use_decl_annotations_
 bool helpers::IsFile(const std::string& path)
 {
-    std::wstring w_path = helpers::AnsiToWide(path);
-    DWORD attr = GetFileAttributes(w_path.c_str());
+    const std::wstring w_path = helpers::AnsiToWide(path);
+    return IsFile(w_path);
+}
 
+_Use_decl_annotations_
+bool helpers::IsFile(const std::wstring &path)
+{
+    const DWORD attr = GetFileAttributes(path.c_str());
     return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY));
 }
 
